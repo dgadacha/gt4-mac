@@ -3,7 +3,8 @@
 GT4Recomp builds and runs natively on a Mac with Apple silicon: the same recompiled game code as the Windows release
 1.2.x, compiled for arm64, with the built-in renderer (CoreGS 1.1, Vulkan compute) running on Metal through MoltenVK,
 and SDL3 for the window, the keyboard, gamepads and sound. There is no installer or launcher: two scripts build the
-game from your own disc image and start it.
+game from your own disc image and start it. The PCSX2 GS renderer of the Windows release (`gt4-gs`, higher internal
+resolutions) also runs on the Mac, built separately: see [PCSX2 GS renderer](#pcsx2-gs-renderer-gt4-gs).
 
 Tested on an M3 Pro (macOS 26.6, Apple clang 17, MoltenVK 1.4.2, SDL 3.4.12): the game boots, creates its save on
 the memory card, plays the opening movie and the menus, and races (Arcade, Nürburgring Nordschleife, six cars) at a
@@ -51,6 +52,7 @@ an M3 Pro. Run it again at any time: a stage whose output exists is only checked
 | `vu` | `slice155-vu1-image`, `slice157-vu1-all-entries`, `slice157-vu1-all-gen` (2,048 VU1 programs), `slice160-vu0-image`, `slice160-vu0-gen-r3` (14 VU0 programs) | image, entry list, table and manifest pins (`slice155-vu1-image.json`, `slice160-vu0-image.json`, `slice262-pcsx2.json`) |
 | `runtime` | `slice262-frame-cost-runtime`, `slice200-memcard-runtime`, `slice262-license-guard-runtime` | `slice262-frame-cost-runtime.json`, `slice262-pcsx2.json`, `slice262-license-guard-runtime.json` |
 | `port` | `slice191-gs-stream-port` | `slice191-gs-stream-runtime.json` |
+| `menu` | `macos-menu-runtime`: the donor `disc.cpp` read through the disc overlay and the license guard `dispatch.cpp` with the menu bridge (see [In-game Graphics menu](#in-game-graphics-menu-experimental)) | `macos-menu-runtime.json` |
 | `shaders` | `slice153-pacing-shaders` (nine SPIR-V files) | `slice262-frame-cost-runtime.json` |
 | `game` | `macos-build/gt4vulkan` and `macos-build/shaders` | CMake checks the capsules, the port, the shaders and the library receipt again |
 
@@ -93,9 +95,9 @@ triggers and rumble; the first connected pad is player 1.
 
 ## Differences from the Windows release
 
-- **Renderer:** CoreGS 1.1 only, at the native resolution (scale 1), with the 16:9 picture and the native aspect
-  ratios. GSdx (the PCSX2 GS in `gt4-gs.exe`) is a Windows process, so 1080p-and-above internal resolutions, the
-  GSdx options and custom texture packs are not available; `GT4_RENDERER=pcsx2` refuses to start.
+- **Renderer:** CoreGS 1.1 by default, at the native resolution (scale 1), with the 16:9 picture and the native
+  aspect ratios. The PCSX2 GS renderer is `gt4-gs` built for macOS (Metal), started with `--renderer pcsx2`; there is
+  no launcher page for its options yet (the internal resolution is in the game's Options > Screen page).
 - **Interlaced menus:** the game shows its menus and movies in 480i, one field per VBlank. CoreGS 1.1 on Windows
   presents each field line-doubled, so the picture bounces by one field line at every VBlank (docs/STATUS.md,
   slice196). The macOS window blends the last two fields instead (`GT4_DEINTERLACE=blend`, the default; `off` shows
@@ -109,6 +111,111 @@ triggers and rumble; the first connected pad is player 1.
 - **Arithmetic:** the code is compiled with `-ffp-contract=off` (arm64 always has fused multiply-add, x86-64 without
   `-march` has none) and `-fno-strict-aliasing` (clang-cl's default), so it computes what the Windows build computes.
 
+## In-game Graphics menu (experimental)
+
+Options > Screen gets a **Display Mode** row (Window, Full Screen): the game's own row, list, texts, tooltip and
+sounds, and the window changes at once. With the PCSX2 GS renderer it also gets a **Resolution** row: Native (the
+PS2 picture), then the common resolutions that fit in the screen (1280x720, 1920x1080, 2560x1440, 3840x2160) and the
+screen's own resolution, for example 3024x1964 on a 14-inch MacBook Pro. The choice applies within a few frames and is
+kept in the GS process's settings file. Cancel on the page restores what the page opened with.
+
+How it works:
+
+1. **Disc overlay.** `scripts/gt4_volume_overlay.py` places replacement files past the end of the disc image and
+   rewrites their records in the `GT4.VOL` catalogue (only the catalogue pages that change are recompressed; the result
+   is read back and checked). With `GT4_DISC_OVERLAY=<file>`, `native/disc_overlay.cpp` serves those bytes through the
+   menu capsule's `disc.cpp`. The disc image itself is never written.
+2. **Option files.** `scripts/gt4_graphics_menu.py` takes the user's `projects/option` files and adds the row to the
+   widget tree (`option.mproject`, a copy of the Video Output row with our names), our texts to `US/rtext.rt2` (RT03,
+   `scripts/gt4_rtext.py`, which rewrites the disc's file byte for byte), and the compiled option script
+   (`option.adc`, below). It checks the hashes of the files it was written for.
+3. **Host bridge.** Two `MSystem` natives are empty in the retail executable: `SetDrawPerfMeter(id, value)` (callback
+   `0x001AC238`) and `IsDrawPerfMeter(id)` (`0x001AC240`). The menu capsule's `dispatch.cpp` runs
+   `native/menu_bridge.cpp` for them: the first sets host setting `id`, the second returns its value as an Adhoc int,
+   built with the game's own functions. A native function gets the result holder in a0, the argument count in a1 and
+   the argument array in a2. The window registers setting 1 (display mode) and setting 2 (field blend, not in the menu
+   yet); with the PCSX2 GS renderer, setting 3 (the resolution choice) and the read-only settings 11 to 15 and 21 to
+   25 (width and height of each resolution offered, `native/gs_resolution.hpp`), which the script writes into the
+   list's items, removing the items the screen does not use. Without the bridge, or in a headless run (no window, no
+   display settings), `IsDrawPerfMeter` returns nil and the script keeps the row hidden.
+
+The option script is not built by this repository. It is compiled from the reconstructed option scripts of OpenAdhoc
+(GPL-3.0) adapted to the v2.00 retail script, with GTAdhocToolchain (MIT) patched to reproduce the 2004 compiler
+(Adhoc version 5): local redeclaration, the declared stack size (a call counts its result above the callee, over the
+whole function), block-scoped static references, no scope for an unbraced `if` body or a `for` initialisation, logical
+chains that jump to their end, no NOP for an empty block, the `case` switch variable. Check: the unmodified rebuild
+equals the disc's `option.adc` byte for byte once debug line numbers and source file names are cleared (247,061
+bytes on both sides), and the toolchain rewrites the disc's file unchanged (251,715 bytes). Those sources and the
+toolchain patch stay private (`private/tools`, `private/menu-work`) until their publication is decided.
+
+```bash
+private/tooling-venv/bin/python scripts/gt4_graphics_menu.py build --iso "Gran Turismo 4 (USA) (v2.00).iso" \
+  --adc <compiled option.adc> --output private/macos-graphics-menu
+```
+
+`scripts/macos_play.py` then starts the game with `private/macos-graphics-menu/overlay.gt4ovl` (`--no-menu-overlay`
+starts without it). `GT4_MENU_BRIDGE_TRACE=1` logs every native the scripts call (invoker, callback, arguments).
+Checked in game with the rebuilt script: every visible Options page opens and closes (the five General pages, the
+four Arcade Mode pages and Course Registration, Photo Lab, the Controllers pages and the Miscellaneous pages); Display
+Mode switches the window to full screen and back. Not yet: the display mode is not kept for the next start
+(`--fullscreen` decides it).
+
+## PCSX2 GS renderer (gt4-gs)
+
+`gt4-gs` is the PCSX2 GS in a process of its own (GPL-3.0, never linked into the game; docs/GS-LIVE.md), built from
+the fork `moesuito/gt4recomp-gs`. Its macOS port is the fork's `gt4gs/macos` branch: the shared-memory transport on
+POSIX (`gs_stream_ipc_posix.cpp`), the JIT-free build on arm64, the Metal renderer, and the picture shown in the game
+window. Its publication is pending; the branch lives in `private/tooling/gt4recomp-gs`.
+
+Build it once (about ten minutes on an M3 Pro), from the fork's folder:
+
+```bash
+xcodebuild -downloadComponent MetalToolchain        # Xcode's Metal shader compiler, about 705 MB
+brew install cmake ninja sdl3 zstd lz4 libpng jpeg-turbo webp freetype harfbuzz
+.github/workflows/scripts/macos/build-dependencies-gt4gs-arm64.sh ../gt4gs-deps
+cmake -S . -B ../gt4gs-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_PREFIX_PATH="$PWD/../gt4gs-deps;$(brew --prefix)" -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF \
+  -DENABLE_GT4GS=ON -DGT4GS_ONLY=ON -DUSE_VULKAN=OFF -DENABLE_TESTS=OFF -DDISABLE_ADVANCE_SIMD=ON
+cmake --build ../gt4gs-build --target pcsx2-gt4gs
+```
+
+The result is `private/tooling/gt4gs-build/pcsx2-gt4gs/gt4-gs` with `resources/` beside it (the Metal shaders
+`Metal23.metallib`, fonts and `GameIndex.yaml`). Then:
+
+```bash
+private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2
+```
+
+`--upscale N` (1 to 12) sets the internal resolution multiplier; the game's Resolution row changes it too. The settings
+are `private/macos-play/gs/gt4-gs.ini` (docs/GS-SETTINGS.md; created on first use with 3x, 1920x1080), its data
+(shader cache) `private/macos-play/gs/data`. `--gs-process <path>` starts another build.
+
+How the picture reaches the window: a macOS process cannot draw into another process's window, so `gt4-gs` has no
+window in live mode. Its Metal layer is the root of a remote Core Animation context (`pcsx2-gt4gs/LiveViewMac.mm`),
+whose id answers CONTROL attach_window (`WindowPayload::layer_id`, docs/GS-STREAM-PROTOCOL.md); the game shows it in
+a `CALayerHost` over its Metal view (`native/picture_layer_host.mm`), scaled to the backing scale, so one picture pixel
+is one screen pixel. Window resizes and fullscreen send CONTROL resize as on Windows. The Resolution row rewrites
+`upscale_multiplier` and sends CONTROL reload_config, which this `gt4-gs` applies to the running GS (the Windows
+1.2.1 build answers it with an error).
+
+Measured on an M3 Pro (macOS 26.6), Arcade race on the Nürburgring Nordschleife:
+
+| Internal resolution | Replay, GS work per frame (mean, worst) |
+|---|---|
+| 1x (native) | 1.8 to 2.2 ms, 5.2 ms |
+| 3x (1920x1080) | 2.2 to 2.4 ms, 3.6 ms |
+| 4x (2560x1440) | 3.4 to 3.6 ms, 19.7 ms (one frame) |
+| 6x (3840x2160) | 7.1 to 7.6 ms, 11.5 ms |
+
+The replay plays a capture of the game's GS stream (`GT4_GS_CAPTURE`, 6,000 frames: boot, menus, movie, race)
+through `gt4-gs --replay-gscap` without a window, the GPU at most two frames behind; the race is frames 3,600 to
+6,000. In game, 6x in the 1920x1080 window holds 60 FPS: the mean frame interval is 16.666 ms, as with the built-in
+renderer, and the slowest frame of each five-second interval is under 19 ms.
+
+Known differences: the 480i menus leave a black band at the bottom of the window (38 to 95 pixels of 1080 on the
+pages checked), which the built-in renderer does not show; the first run compiles shaders (a notice at the bottom
+left of the picture, gone once they are in the cache).
+
 ## Under the hood
 
 | File | Role |
@@ -119,10 +226,13 @@ triggers and rumble; the first connected pad is player 1.
 | `native/frame_clock_posix.cpp` | the frame pacer's clock (steady clock, nanosleep and a final spin) |
 | `native/native_vulkan.cpp` (`set_interlaced_presentation`) | the field blend of interlaced pictures in transfer operations: the newest field replaces its rows in a woven image, a 2:1 linear blit averages each pair of rows and a 1:2 linear blit returns to the display height; `GT4_PRESENT_DUMP=<folder>` with `GT4_PRESENT_DUMP_FRAMES=first:last` writes the presented pictures (before the window scaling) as PPM files, for tests |
 | `native/native_vulkan.*`, `native/vulkan_extensions.*` | the Vulkan loader (`dlopen`: next to the executable, Homebrew `vulkan-loader`, then MoltenVK), the Metal surface (`VK_EXT_metal_surface`, the window's CAMetalLayer as the surface handle), `VK_KHR_portability_enumeration` and `VK_KHR_portability_subset` |
-| `native/gs_stream/gs_stream_client_donor_only.cpp` | the GS stream hooks without a GS process: the built-in renderer, every hook returns at once |
-| `native/posix_compat.h` | `_putenv_s` and `tmpfile_s` for the shared sources, so the derived port files keep their pinned bytes |
+| `native/gs_stream/gs_stream_client.cpp`, `native/gs_stream/gs_stream_ipc_posix.cpp` | the GS stream client of the Windows release (the process start, file hash and clocks have POSIX versions) and its transport on POSIX shared memory and address waits; `GT4_GS_CAPTURE` writes `.gscap` files with either renderer |
+| `native/picture_layer_host.mm` | `GT4_RENDERER=pcsx2`: the GS process's picture layer in the window; `GT4_WINDOW_CAPTURE_DIR=<folder>` (with `GT4_WINDOW_CAPTURE_EVERY`, VBlanks) writes the window as the player sees it, for tests |
+| `native/gs_config_file.*`, `native/gs_resolution.*` | the Resolution row: one key of `gt4-gs.ini` changed in place, and the resolutions offered per screen with their multipliers (fixtures `native_gs_config_file`, `native_gs_resolution`) |
+| `native/posix_compat.h` | `_putenv_s`, `tmpfile_s` and `fopen_s` for the shared sources, so the derived port files keep their pinned bytes |
 | `scripts/vu1_image.py build --pinned-tail` | the VU1 image without the recorded snapshots: the tail comes from the pin, and the image must equal the pinned image |
 | `scripts/prepare_external_vulkan.py`, `scripts/prepare_perf_runtime.py` | write their pinned text files with CRLF on every platform (they used the platform's text mode) |
+| `scripts/prepare_menu_runtime.py`, `native/disc_overlay.*`, `native/menu_bridge*` | the in-game Graphics menu hooks (section above) and their fixtures `native_disc_overlay` and `native_menu_bridge` |
 
 Environment variables are the Windows ones (docs/BUILD.md and the launcher). `scripts/macos_play.py` sets those of the
 launcher: `PS2_SCALE=1`, `PS2_GS=gpu`, `GT4_FORCE_WIDESCREEN=1`, `GT4_FORCE_480P=1`, `GT4_DISPLAY_ASPECT=auto`,
@@ -145,10 +255,10 @@ The guest executable must be named `SCUS_973.28`. Add `--window` for the window 
 ctest --test-dir private/macos-build --output-on-failure
 ```
 
-After a full build (`cmake --build private/macos-build`), all 36 tests pass, among them the Vulkan pixel tests
+After a full build (`cmake --build private/macos-build`), all 41 tests pass, among them the Vulkan pixel tests
 (compute raster, display and readback against the CPU reference, presentation and resize on MoltenVK), the
-asynchronous stress test, the VU0 and VU1 differential tests and the Python suite (644 tests, 80 skipped: Windows
-assets and the Windows-only GS process and capture tools). The Python tests run with the resolved temporary folder
+asynchronous stress test, the VU0 and VU1 differential tests, the GS stream transport and the Python suite (654
+tests, 80 skipped: Windows assets and the Windows-only launcher and capture tools). The Python tests run with the resolved temporary folder
 (`/private/var/...`): the tools refuse paths with a linked ancestor, and macOS reaches `/var` through a link.
 
 ## Troubleshooting
@@ -159,4 +269,5 @@ assets and the Windows-only GS process and capture tools). The Python tests run 
 | `missing donor checkout` or a donor pin mismatch | clone the donor again with `-c core.autocrlf=true` (a LF checkout differs from every pin) |
 | `... holds [...], expected [...]` | a capsule folder holds an extra file (the checks ignore Finder's `.DS_Store` only): delete the folder, the next build derives it again |
 | `Cannot exclusively lock game memory card` | another game session uses the card; close it first |
-| `GT4_RENDERER=pcsx2 needs the GS process` | unset `GT4_RENDERER` (the built-in renderer is the only one on macOS) |
+| `GT4_RENDERER=pcsx2 needs GT4_GS_PROCESS` or `missing GS process` | build `gt4-gs` ([PCSX2 GS renderer](#pcsx2-gs-renderer-gt4-gs)) or start without `--renderer pcsx2` |
+| `cannot execute tool 'metal' due to missing Metal Toolchain` (building `gt4-gs`) | `xcodebuild -downloadComponent MetalToolchain` |

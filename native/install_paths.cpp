@@ -63,7 +63,11 @@ bool has_build_time_fallback(const std::filesystem::path &build_time_directory) 
 std::filesystem::path installed_gs_process() {
   const std::filesystem::path directory = executable_directory();
   if (directory.empty()) return {};
+#ifdef _WIN32
   const std::filesystem::path candidate = directory / "gs" / "gt4-gs.exe";
+#else
+  const std::filesystem::path candidate = directory / "gs" / "gt4-gs";
+#endif
   std::error_code error;
   if (!std::filesystem::is_regular_file(candidate, error)) return {};
   return candidate;

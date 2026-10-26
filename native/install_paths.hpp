@@ -18,7 +18,8 @@ std::filesystem::path choose_shader_directory(const std::filesystem::path &build
 // True when the executable carries a build-time shader folder (development build), false for a release build.
 bool has_build_time_fallback(const std::filesystem::path &build_time_directory);
 
-// <executable folder>\gs\gt4-gs.exe when that file exists, else an empty path. GT4_GS_PROCESS overrides it at the caller.
+// <executable folder>\gs\gt4-gs.exe (gs/gt4-gs on macOS) when that file exists, else an empty path. GT4_GS_PROCESS
+// overrides it at the caller.
 std::filesystem::path installed_gs_process();
 
 // `gt4vulkan.exe --portable-check`: prints the paths the game would use and returns 0 when the required folders are

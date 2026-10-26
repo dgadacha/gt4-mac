@@ -9,9 +9,16 @@
 // consumer seeing its peer die.
 #include "gs_stream_ipc.hpp"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -63,7 +70,11 @@ void check_layout() {
   require(c.command_offset == 4096 && c.command_capacity == 8192 && c.response_offset == 4096 + 8192, "regions");
   require(std::string(c.serial) == "TEST-00001", "serial");
   require(session->commands_out().max_payload() == 4096 - 16, "max payload is capacity/2 minus the header");
+#ifdef _WIN32
   require(session->name().rfind("Local\\gt4gs-test-", 0) == 0, "session name prefix");
+#else
+  require(session->name().rfind("/gt4gs-test-", 0) == 0 && session->name().size() <= 31, "session name prefix");
+#endif
   bool rejected = false;
   try {
     Session::create_producer(small_options(1000));
@@ -179,7 +190,13 @@ std::uint64_t serve(Session &consumer, std::uint64_t die_after = 0, std::uint32_
   for (;;) {
     consumer.next_command(view);
     ++seen;
-    if (die_after && seen == die_after) ExitProcess(9);  // abrupt death: no EXITING, no release
+    if (die_after && seen == die_after) {  // abrupt death: no EXITING, no release
+#ifdef _WIN32
+      ExitProcess(9);
+#else
+      _exit(9);
+#endif
+    }
     const auto type = static_cast<RecordType>(view.header->type);
     if (type == RecordType::read_fifo) {
       ReadFifoPayload request;
@@ -365,6 +382,7 @@ void check_fatal_flag() {
   std::puts("[gs-stream-ipc] fatal flag ok");
 }
 
+#ifdef _WIN32
 std::wstring this_executable() {
   wchar_t path[MAX_PATH];
   const DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -375,6 +393,25 @@ ChildProcess spawn_child(const Session &producer_session, const char *mode) {
   const std::wstring arguments = L"--child " + widen(producer_session.name()) + L" " + widen(mode);
   return ChildProcess::spawn(this_executable(), arguments);
 }
+#else
+std::string this_executable() {
+#if defined(__APPLE__)
+  char path[4096];
+  std::uint32_t size = sizeof path;
+  if (_NSGetExecutablePath(path, &size) != 0) throw std::runtime_error("executable path too long");
+  return path;
+#else
+  char path[4096];
+  const ssize_t length = readlink("/proc/self/exe", path, sizeof path - 1);
+  if (length <= 0) throw std::runtime_error("cannot read /proc/self/exe");
+  return std::string(path, static_cast<std::size_t>(length));
+#endif
+}
+
+ChildProcess spawn_child(const Session &producer_session, const char *mode) {
+  return ChildProcess::spawn(this_executable(), {"--child", producer_session.name(), mode});
+}
+#endif
 
 // Child: opens the session, waits on the parent process, posts READY (unless silent), then serves.
 int child_main(const std::string &name, const std::string &mode) {
@@ -383,7 +420,7 @@ int child_main(const std::string &name, const std::string &mode) {
   consumer->set_peer(parent);
   consumer->control().consumer_pid = current_process_id();
   if (mode == "silent") {
-    Sleep(30000);
+    std::this_thread::sleep_for(std::chrono::seconds(30));
     return 0;
   }
   ReadyPayload ready{};

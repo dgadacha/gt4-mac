@@ -7,8 +7,13 @@
 // GT4_OUTPUT_SIZE; F7/F8/F9 drive the performance probe; Alt+Enter, F11, Cmd+F and Ctrl+Cmd+F toggle fullscreen.
 // GT4_DEINTERLACE=blend (default) or off: the 480i menus blend their two fields instead of bouncing by one field
 // line at every VBlank (native_vulkan.hpp, set_interlaced_presentation).
-// GT4_MONITOR names a Windows display and is ignored here. Racing wheels, achievements and the GS process
-// (GT4_RENDERER=pcsx2) are Windows only.
+// The in-game Graphics menu reads and changes the fullscreen state and the field blend through the option scripts'
+// host bridge (menu_bridge.hpp).
+// GT4_MONITOR names a Windows display and is ignored here. Racing wheels and achievements are Windows only.
+// GT4_RENDERER=pcsx2: the GS process (gs/gt4-gs, GT4_GS_PROCESS) draws the picture and this window shows its remote layer
+// (picture_layer_host.hpp) once the process names it after attach_window.
+// Test aid: GT4_WINDOW_CAPTURE_DIR=<folder> writes the window as the player sees it (window_<VBlank>.png) every
+// GT4_WINDOW_CAPTURE_EVERY VBlanks (default 600), with either renderer.
 
 #include "window.hpp"
 #include "race_display.hpp"
@@ -24,10 +29,14 @@
 #include "frame_clock.hpp"
 #include "pacing.hpp"
 #include "window_mode.hpp"
+#include "menu_bridge.hpp"
 #include "cursor_autohide.hpp"
 #ifdef GT4_GS_STREAM_CLIENT
 #include "gs_stream/gs_stream_client.hpp"
 #endif
+#include "picture_layer_host.hpp"
+#include "gs_config_file.hpp"
+#include "gs_resolution.hpp"
 #ifdef GT4_MTVU_MEASURE
 #include "mtvu_measure.hpp"
 #endif
@@ -42,9 +51,11 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -195,6 +206,148 @@ void set_fullscreen(bool enabled) {
     std::fprintf(stderr, "[window] fullscreen %s failed: %s\n", enabled ? "on" : "off", SDL_GetError());
 }
 
+// GT4_RENDERER=pcsx2: the GS process draws the picture (no MoltenVK device in this process).
+bool gs_process_renderer() {
+#ifdef GT4_GS_STREAM_CLIENT
+  return gt4::gs_stream::stream_renderer();
+#else
+  return false;
+#endif
+}
+
+// GT4_RENDERER=pcsx2: the Graphics menu's Resolution row (menu_bridge.hpp kInternalResolution). Choice 0 is the PS2
+// picture, choice n the n-th resolution offered for the screen that holds the window (gs_resolution.hpp).
+std::vector<gt4::gs_resolution::Resolution> offered_resolutions;
+int resolution_choice = 0;
+
+int choice_multiplier(int choice) {
+  return choice == 0 ? 1 : gt4::gs_resolution::multiplier(offered_resolutions[static_cast<std::size_t>(choice - 1)]);
+}
+
+std::string choice_name(int choice) {
+  if (choice == 0)
+    return "native";
+  const auto &resolution = offered_resolutions[static_cast<std::size_t>(choice - 1)];
+  return std::to_string(resolution.width) + "x" + std::to_string(resolution.height);
+}
+
+// The choice comes from the GS process's settings file (GT4_GS_CONFIG); a change rewrites its multiplier and asks the
+// GS process to read the file again (the new resolution shows within a few frames).
+void register_resolution_setting() {
+  namespace bridge = gt4::menu_bridge;
+  const char *path = std::getenv("GT4_GS_CONFIG");
+  std::string text;
+  if (!gs_process_renderer() || !path || !*path)
+    return;
+  if (!gt4::gs_config::read_file(path, text)) {
+    std::fprintf(stderr, "[window] cannot read GT4_GS_CONFIG %s: no resolution row in the menu\n", path);
+    return;
+  }
+  // The display mode is in points; its pixel density gives the screen's pixels.
+  const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(game_window));
+  const auto screen_width = mode ? static_cast<std::uint32_t>(std::lround(mode->w * mode->pixel_density)) : 0u;
+  const auto screen_height = mode ? static_cast<std::uint32_t>(std::lround(mode->h * mode->pixel_density)) : 0u;
+  offered_resolutions = gt4::gs_resolution::offered(screen_width, screen_height);
+  const int multiplier = std::atoi(gt4::gs_config::value(text, "EmuCore/GS", "upscale_multiplier").value_or("1").c_str());
+  const int choices = static_cast<int>(offered_resolutions.size()) + 1;
+  for (int choice = 0; choice < choices; ++choice)
+    if (choice_multiplier(choice) <= multiplier)
+      resolution_choice = choice;
+  std::string list;
+  for (int choice = 1; choice < choices; ++choice)
+    list += " " + choice_name(choice) + " (x" + std::to_string(choice_multiplier(choice)) + ")";
+  std::fprintf(stderr, "[window] resolutions offered for the %ux%u screen:%s; GT4_GS_CONFIG has x%d (%s)\n",
+               screen_width, screen_height, list.c_str(), multiplier, choice_name(resolution_choice).c_str());
+  for (int slot = 1; slot <= gt4::gs_resolution::kMaxListed; ++slot) {
+    const gt4::gs_resolution::Resolution resolution =
+        slot < choices ? offered_resolutions[static_cast<std::size_t>(slot - 1)] : gt4::gs_resolution::Resolution{};
+    bridge::register_setting(bridge::kResolutionWidthBase + slot,
+                             {[width = static_cast<int>(resolution.width)] { return width; }, {}, 0, 0});
+    bridge::register_setting(bridge::kResolutionHeightBase + slot,
+                             {[height = static_cast<int>(resolution.height)] { return height; }, {}, 0, 0});
+  }
+  bridge::register_setting(
+      bridge::kInternalResolution,
+      {[] { return resolution_choice; },
+       [config = std::string(path)](int choice) {
+         std::string contents;
+         if (choice == resolution_choice)
+           return;
+         if (!gt4::gs_config::read_file(config, contents) ||
+             !gt4::gs_config::write_file(config, gt4::gs_config::with_value(contents, "EmuCore/GS", "upscale_multiplier",
+                                                                        std::to_string(choice_multiplier(choice))))) {
+           std::fprintf(stderr, "[window] cannot write the resolution to %s\n", config.c_str());
+           return;
+         }
+         resolution_choice = choice;
+#ifdef GT4_GS_STREAM_CLIENT
+         gt4::gs_stream::reload_gs_settings();
+#endif
+         std::fprintf(stderr, "[window] resolution from the menu: %s (x%d)\n", choice_name(choice).c_str(),
+                      choice_multiplier(choice));
+       },
+       0, choices - 1});
+}
+
+// In-game Graphics menu (menu_bridge.hpp): the option scripts read and change these live settings on this thread.
+void register_menu_settings() {
+  namespace bridge = gt4::menu_bridge;
+  bridge::register_setting(bridge::kDisplayMode, {[] { return fullscreen ? 1 : 0; },
+                                                  [](int value) {
+                                                    set_fullscreen(value != 0);
+                                                    std::fprintf(stderr, "[window] display mode from the menu: %s\n",
+                                                                 fullscreen ? "full screen" : "window");
+                                                  },
+                                                  0, 1});
+  bridge::register_setting(bridge::kDeinterlacing, {[] { return blend_interlaced_fields ? 1 : 0; },
+                                                    [](int value) { blend_interlaced_fields = value != 0; }, 0, 1});
+  register_resolution_setting();
+}
+
+// GT4_WINDOW_CAPTURE_DIR / GT4_WINDOW_CAPTURE_EVERY (test aid, see the top of this file).
+std::string window_capture_dir;
+std::uint64_t window_capture_every = 600;
+std::uint64_t vblank_count = 0;
+
+void capture_window_at_vblank() {
+  ++vblank_count;
+  if (window_capture_dir.empty() || vblank_count % window_capture_every != 0)
+    return;
+  void *window = SDL_GetPointerProperty(SDL_GetWindowProperties(game_window), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+  char name[32];
+  std::snprintf(name, sizeof name, "/window_%05llu.png", static_cast<unsigned long long>(vblank_count));
+  if (!window || !gt4::picture_host::capture_window(window, (window_capture_dir + name).c_str()))
+    std::fprintf(stderr, "[window] capture at VBlank %llu failed\n", static_cast<unsigned long long>(vblank_count));
+}
+
+// GT4_RENDERER=pcsx2: the picture follows the window's pixel size and backing scale.
+void resize_gs_picture(std::uint32_t width, std::uint32_t height) {
+#ifdef GT4_GS_STREAM_CLIENT
+  if (gt4::picture_host::shown())
+    gt4::picture_host::resize(width, height, SDL_GetWindowPixelDensity(game_window));
+#else
+  (void)width, (void)height;
+#endif
+}
+
+// GT4_RENDERER=pcsx2: the GS process names its picture layer in its answer to attach_window, which the client reads
+// after a VSYNC; the picture shows from the first VBlank after that.
+void show_gs_picture() {
+#ifdef GT4_GS_STREAM_CLIENT
+  if (!gs_process_renderer() || gt4::picture_host::shown())
+    return;
+  const std::uint32_t layer = gt4::gs_stream::picture_layer_id();
+  int width = 0, height = 0;
+  if (!layer || !SDL_GetWindowSizeInPixels(game_window, &width, &height))
+    return;
+  const double scale = SDL_GetWindowPixelDensity(game_window);
+  gt4::picture_host::resize(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), scale);
+  if (gt4::picture_host::show(layer))
+    std::fprintf(stderr, "[window] GS process picture shown: layer context %u, %dx%d pixels, scale %.2f\n", layer, width,
+                 height, scale);
+#endif
+}
+
 // TASK-080 presentation sink (native/display_aspect.hpp, EE thread): CoreGS 1.1 fills a rectangle of the race
 // projection ratio.
 void present_race_view(bool fill, double ratio) {
@@ -268,6 +421,7 @@ bool pump_messages() {
       gt4::display_aspect::set_window_client_size(width, height);
       if (surface_attached)
         ps2::gs::resize_window(width, height);
+      resize_gs_picture(width, height);
       break;
     }
     case SDL_EVENT_MOUSE_MOTION:
@@ -306,6 +460,8 @@ void on_vblank() {
   GT4_PERF_SCOPE(gt4::perf::Category::host_vblank);
   if (!pump_messages())
     return;
+  show_gs_picture();
+  capture_window_at_vblank();
   update_cursor();
   if (force_480p_enabled)
     gt4::display::force_race_480p_at_vblank(ps2::g_ram, ps2::kRamSize, force_480p_state);
@@ -476,6 +632,9 @@ int run_window(const std::function<int()> &emulate) {
     controller = nullptr;
     surface_attached = false;
     unlock_memory_card();
+#ifdef GT4_GS_STREAM_CLIENT
+    gt4::picture_host::release();
+#endif
     if (metal_view)
       SDL_Metal_DestroyView(metal_view);
     metal_view = nullptr;
@@ -501,6 +660,17 @@ int run_window(const std::function<int()> &emulate) {
     }
     std::fprintf(stderr, "[window] interlaced fields: %s (GT4_DEINTERLACE)\n",
                  blend_interlaced_fields ? "blend" : "off");
+    if (const char *directory = std::getenv("GT4_WINDOW_CAPTURE_DIR"); directory && *directory) {
+      window_capture_dir = directory;
+      if (const char *every = std::getenv("GT4_WINDOW_CAPTURE_EVERY"); every && *every) {
+        char *end = nullptr;
+        window_capture_every = std::strtoull(every, &end, 10);
+        if (*end || window_capture_every == 0)
+          throw std::invalid_argument("GT4_WINDOW_CAPTURE_EVERY must be a number of VBlanks above 0");
+      }
+      std::fprintf(stderr, "[window] window capture to %s every %llu VBlanks (GT4_WINDOW_CAPTURE_DIR)\n",
+                   window_capture_dir.c_str(), static_cast<unsigned long long>(window_capture_every));
+    }
     cursor_autohide = gt4::cursor::AutoHide(gt4::cursor::parse_policy(std::getenv("GT4_CURSOR_AUTOHIDE")));
     std::fprintf(stderr, "[window] cursor auto-hide %s (GT4_CURSOR_AUTOHIDE; %u ms without movement over the picture)\n",
                  cursor_autohide.policy().auto_hide ? "on" : "off", cursor_autohide.policy().hide_delay_ms);
@@ -520,15 +690,22 @@ int run_window(const std::function<int()> &emulate) {
     ps2::init_graphics();
     std::uint32_t width = 0, height = 0;
     pixel_size(width, height);
+    const bool gs_process = gs_process_renderer();
+#ifdef GT4_GS_STREAM_CLIENT
+    if (gs_process)
+      gt4::picture_host::prepare(SDL_Metal_GetLayer(metal_view));
+#endif
+    // With GT4_RENDERER=pcsx2 the spliced gs.cpp sends CONTROL attach_window to the GS process instead.
     if (!ps2::gs::attach_window(3, nullptr, reinterpret_cast<std::uint64_t>(SDL_Metal_GetLayer(metal_view)), nullptr,
                                 nullptr, width, height))
-      throw std::runtime_error("Native Vulkan presentation refused window");
+      throw std::runtime_error(gs_process ? "The GS process refused the window" : "Native Vulkan presentation refused window");
     surface_attached = true;
+    register_menu_settings();
     // The presentation is 16:9 pillarbox; TASK-080 fills the screen in the race view at other ratios.
     ps2::gs::gpu::set_widescreen(true);
     gt4::display_aspect::set_presentation_sink(present_race_view);
-    std::fprintf(stderr,
-                 "[window] real guest GPU output through native Vulkan (MoltenVK)\n");
+    std::fprintf(stderr, gs_process ? "[window] picture from the GS process (GT4_RENDERER=pcsx2)\n"
+                                    : "[window] real guest GPU output through native Vulkan (MoltenVK)\n");
     ps2::g_options.on_vblank = on_vblank;
     AudioOutput audio(pump_messages, pacing_mode);
     audio_output = &audio;

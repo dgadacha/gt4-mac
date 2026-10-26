@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Game-side GS stream backend; see gs_stream_client.hpp and docs/GS-STREAM-PROTOCOL.md section 7.
+// Windows and macOS: the platform parts (process start, file hash, clocks, the message box of a failed GS process) are
+// the only differences; macOS shows no message box, the reasons go to the log.
 #include "gs_stream_client.hpp"
 
 #include "gs_stream_file.hpp"
@@ -8,10 +10,16 @@
 #include "../install_paths.hpp"
 #include "../display_aspect.hpp"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <bcrypt.h>
+#else
+#include <CommonCrypto/CommonDigest.h>
+#include <sys/stat.h>
+#include <time.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -21,12 +29,15 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
 #pragma comment(lib, "bcrypt.lib")
+#endif
 
 namespace gt4::gs_stream {
 namespace {
@@ -50,8 +61,10 @@ constexpr std::uint32_t kHandshakeTimeoutMinMs = 1000, kHandshakeTimeoutMaxMs = 
 // zeros) before it halts: the runtime writes a changed memory card after 50 quiet VSYNCs, so a save in progress is
 // finished and flushed first (TASK-038). GT4_GS_LOST_GRACE_FRAMES (tests): 0..600.
 constexpr std::uint32_t kLostGraceFrames = 180, kLostGraceMaxFrames = 600;
+#ifdef _WIN32
 // Printed when the player asked for a restart with the built-in renderer; the launcher looks for this line.
 constexpr const char *kRestartMarker = "[gs-ipc] restart requested: renderer donor (CoreGS 1.1)";
+#endif
 constexpr std::uint32_t kShutdownTimeoutMs = 3000;
 // GIF data per record and qwords per READ_FIFO: fixed by the default region sizes, so the in-process capture and a
 // recorder process split the same chunks the same way (byte-identical files).
@@ -75,6 +88,8 @@ using PrivilegedSlots = std::array<PrivilegedSlot, kPrivilegedRegisterSlots>;
 PrivilegedOrdering g_privileged_ordering;
 // TASK-062: cumulative VU1 worker busy time (MTVU bridge, pcsx2 mode); null: unknown.
 std::uint64_t (*g_worker_busy_us)() = nullptr;
+// macOS: the GS process's picture layer context from WINDOW restored (0 until it arrives); read by the window.
+std::atomic<std::uint32_t> g_picture_layer_id{0};
 // TASK-060: cursor policy of the game window, sent to a 1.2 consumer after attach_window (set by window.cpp).
 bool g_cursor_auto_hide = true;
 std::uint32_t g_cursor_hide_delay_ms = 3000;
@@ -82,12 +97,31 @@ std::uint32_t g_cursor_hide_delay_ms = 3000;
 // Low 32 bits: the mode; high 32 bits: the fill target aspect x 1e6 (0 = the whole window; P2, slice217).
 std::atomic<std::uint64_t> g_display_aspect_wanted{0};
 
+#ifndef _WIN32
+// macOS: the performance counter of the Windows code below, over the monotonic clock in nanoseconds.
+struct LARGE_INTEGER {
+  std::int64_t QuadPart;
+};
+void QueryPerformanceCounter(LARGE_INTEGER *value) {
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  value->QuadPart = static_cast<std::int64_t>(now.tv_sec) * 1000000000 + now.tv_nsec;
+}
+void QueryPerformanceFrequency(LARGE_INTEGER *value) { value->QuadPart = 1000000000; }
+#endif
+
 // CPU time of the calling thread in microseconds (UINT64_MAX when unavailable).
 std::uint64_t thread_cpu_us() {
+#ifdef _WIN32
   FILETIME created{}, exited{}, kernel{}, user{};
   if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) return UINT64_MAX;
   const auto ticks = [](FILETIME value) { return (std::uint64_t(value.dwHighDateTime) << 32) | value.dwLowDateTime; };
   return ticks(kernel) / 10 + ticks(user) / 10;
+#else
+  timespec cpu{};
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu) != 0) return UINT64_MAX;
+  return static_cast<std::uint64_t>(cpu.tv_sec) * 1000000 + static_cast<std::uint64_t>(cpu.tv_nsec) / 1000;
+#endif
 }
 
 // Nanoseconds between two QueryPerformanceCounter values.
@@ -105,6 +139,7 @@ constexpr const char *kPrivilegedNames[kPrivilegedRegisterSlots] = {
     "PMODE", "SMODE1", "SMODE2", "SRFSH", "SYNCH1", "SYNCH2", "SYNCV", "DISPFB1", "DISPLAY1", "DISPFB2",
     "DISPLAY2", "EXTBUF", "EXTDATA", "EXTWRITE", "BGCOLOR", "CSR", "IMR", "BUSDIR", "SIGLBLID", "other"};
 
+#ifdef _WIN32
 // A visible top-level window of this process (the game window exists before the GS process starts), or null.
 HWND visible_game_window() {
   struct Search {
@@ -138,13 +173,16 @@ void offer_restart(HWND window, const std::wstring &what) {
     std::fflush(stderr);
   }
 }
+#endif
 
 [[noreturn]] void refuse(const std::string &message) {
   std::fprintf(stderr, "[gs-ipc] %s; refusing to start\n", message.c_str());
   std::fflush(stderr);
+#ifdef _WIN32
   // The game window is already open in a windowed run: say why it closes (headless runs have no window).
   if (HWND window = visible_game_window())
     offer_restart(window, L"The GS renderer (gt4-gs.exe) could not start:\n" + wide_text(message) + L".");
+#endif
   std::exit(EXIT_FAILURE);
 }
 
@@ -223,12 +261,47 @@ std::string ascii(const char *text, std::size_t size) {
   return std::string(text, length);
 }
 
-// TASK-059: the GS process path. GT4_GS_PROCESS wins; otherwise <executable folder>\gs\gt4-gs.exe (install_paths.cpp)
-// is used when that file exists. Returns an empty string when neither is available.
+// TASK-059: the GS process path. GT4_GS_PROCESS wins; otherwise <executable folder>\gs\gt4-gs.exe (install_paths.cpp;
+// gs/gt4-gs on macOS) is used when that file exists. Returns an empty string when neither is available.
 std::string gs_process_path() {
   if (const char *value = std::getenv("GT4_GS_PROCESS"); value && *value) return value;
   return gt4::install::installed_gs_process().string();
 }
+
+#ifdef _WIN32
+constexpr const char *kInstalledGsProcess = "<game folder>\\gs\\gt4-gs.exe";
+
+bool path_exists(const std::string &path) { return GetFileAttributesW(ipc::widen(path).c_str()) != INVALID_FILE_ATTRIBUTES; }
+
+bool process_sha256(const std::string &path, std::string &hex, std::string &error) {
+  return file_sha256(ipc::widen(path), hex, error);
+}
+
+// --ipc <session> --parent <pid> [--config "<ini>"] on one command line.
+ipc::ChildProcess spawn_gs_process(const std::string &process, const std::string &session, const std::string &config) {
+  std::wstring arguments = L"--ipc " + ipc::widen(session) + L" --parent " + std::to_wstring(ipc::current_process_id());
+  if (!config.empty()) arguments += L" --config \"" + ipc::widen(config) + L"\"";
+  return ipc::ChildProcess::spawn(ipc::widen(process), arguments);
+}
+#else
+constexpr const char *kInstalledGsProcess = "<game folder>/gs/gt4-gs";
+
+bool path_exists(const std::string &path) {
+  struct stat status{};
+  return stat(path.c_str(), &status) == 0;
+}
+
+bool process_sha256(const std::string &path, std::string &hex, std::string &error) { return file_sha256(path, hex, error); }
+
+ipc::ChildProcess spawn_gs_process(const std::string &process, const std::string &session, const std::string &config) {
+  std::vector<std::string> arguments = {"--ipc", session, "--parent", std::to_string(ipc::current_process_id())};
+  if (!config.empty()) {
+    arguments.push_back("--config");
+    arguments.push_back(config);
+  }
+  return ipc::ChildProcess::spawn(process, arguments);
+}
+#endif
 
 class Client {
  public:
@@ -346,6 +419,7 @@ class Client {
     if (osd_wanted_) osd_after_vsync();
     const std::uint64_t resize = pending_resize_.exchange(0);
     if ((resize >> 63) && stream()) control(proto::ControlKind::resize, (resize >> 32) & 0x7FFFFFFFu, resize & 0xFFFFFFFFu, 0);
+    if (pending_reload_.exchange(false) && stream()) control(proto::ControlKind::reload_config, 0, 0, 0);
     post_display_aspect();
   }
 
@@ -362,11 +436,17 @@ class Client {
   }
 
   void attach(std::uint64_t window, std::uint32_t width, std::uint32_t height) {
+#ifdef _WIN32
     // The GS process draws into a child of our window: the parent must not paint over it.
     const HWND parent = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window));
     SetWindowLongPtrW(parent, GWL_STYLE, GetWindowLongPtrW(parent, GWL_STYLE) | WS_CLIPCHILDREN);
+    const std::uint64_t parent_argument = window;
+#else
+    // macOS: no window handle means anything in another process; WINDOW restored names the picture layer instead.
+    const std::uint64_t parent_argument = 0;
+#endif
     window_ = window;
-    control(proto::ControlKind::attach_window, window, width, height);
+    control(proto::ControlKind::attach_window, parent_argument, width, height);
     // TASK-060 (protocol 1.2): the GS child window applies the same cursor rule as this window. An older consumer
     // would answer an unknown CONTROL kind with an error, so it is not sent there (that consumer never hides it).
     if (session_ && ready_.version_minor >= 2)
@@ -400,6 +480,8 @@ class Client {
     // Bit 63 marks a pending request; the window thread may call this between VSYNCs.
     pending_resize_.store((std::uint64_t(1) << 63) | (std::uint64_t(width & 0x7FFFFFFFu) << 32) | height);
   }
+
+  void request_reload() { pending_reload_.store(true); }
 
   void set_halt(void (*halt)(const char *)) { halt_ = halt; }
 
@@ -451,6 +533,7 @@ class Client {
                    osd_post_ns_max_ / 1000.0,
                    osd_ticks_ ? osd_tick_ns_total_ / 1000.0 / static_cast<double>(osd_ticks_) : 0.0);
     std::fflush(output);
+#ifdef _WIN32
     if (dead_ && window_) {
       // The player sees a window that stopped updating: say why. The guest ran on for the grace VSYNCs after the GS
       // process died, so a changed memory card was written by the runtime (50 quiet VSYNCs) before the halt.
@@ -459,6 +542,7 @@ class Client {
                         (exit_known_ ? L" with exit code " + std::to_wstring(exit_code_) : std::wstring()) +
                         L".\nThe game will now close. Your memory card was saved.");
     }
+#endif
   }
 
  private:
@@ -490,7 +574,7 @@ class Client {
     const std::string process_path = gs_process_path();
     const char *process = process_path.c_str();
     if (process_path.empty())
-      refuse("GT4_RENDERER=pcsx2 needs GT4_GS_PROCESS=<path of the GS process> or <game folder>\\gs\\gt4-gs.exe");
+      refuse(std::string("GT4_RENDERER=pcsx2 needs GT4_GS_PROCESS=<path of the GS process> or ") + kInstalledGsProcess);
     handshake_timeout_ms_ = environment_number("GT4_GS_HANDSHAKE_TIMEOUT_MS", kHandshakeTimeoutMs, kHandshakeTimeoutMinMs,
                                                kHandshakeTimeoutMaxMs);
     lost_grace_frames_ = environment_number("GT4_GS_LOST_GRACE_FRAMES", kLostGraceFrames, 0, kLostGraceMaxFrames);
@@ -503,18 +587,17 @@ class Client {
     // TASK-036: the GS process must match its pin (GT4_GS_PROCESS_SHA256, set by the launcher from the manifest).
     if (const char *pin = std::getenv("GT4_GS_PROCESS_SHA256"); pin && *pin) {
       std::string actual, error;
-      if (!file_sha256(ipc::widen(process), actual, error)) refuse(std::string("cannot hash the GS process ") + process + ": " + error);
+      if (!process_sha256(process_path, actual, error)) refuse(std::string("cannot hash the GS process ") + process + ": " + error);
       std::string expected(pin);
       std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
       if (actual != expected)
         refuse(std::string("the GS process ") + process + " has SHA-256 " + actual + ", the pin is " + expected);
       std::fprintf(stderr, "[gs-ipc] GS process SHA-256 matches its pin (%s)\n", actual.c_str());
     }
-    std::wstring config_argument;
+    std::string config_path;
     if (const char *config = std::getenv("GT4_GS_CONFIG"); config && *config) {
-      if (GetFileAttributesW(ipc::widen(config).c_str()) == INVALID_FILE_ATTRIBUTES)
-        refuse(std::string("GT4_GS_CONFIG=") + config + " does not exist");
-      config_argument = L" --config \"" + ipc::widen(config) + L"\"";
+      if (!path_exists(config)) refuse(std::string("GT4_GS_CONFIG=") + config + " does not exist");
+      config_path = config;
     }
     ipc::SessionOptions options;
     options.serial = kGameSerial;
@@ -525,9 +608,7 @@ class Client {
     try {
       session_ = ipc::Session::create_producer(options);
       session_->set_data_wake_bytes(wake_bytes);
-      const std::wstring arguments = L"--ipc " + ipc::widen(session_->name()) + L" --parent " +
-                                     std::to_wstring(ipc::current_process_id()) + config_argument;
-      child_ = ipc::ChildProcess::spawn(ipc::widen(process), arguments);
+      child_ = spawn_gs_process(process_path, session_->name(), config_path);
       session_->set_peer(child_.process());
     } catch (const ipc::IpcError &error) {
       refuse(std::string("cannot start the GS process ") + process + ": " + error.what());
@@ -703,7 +784,12 @@ class Client {
       } else if (type == RecordType::exiting) {
         std::fprintf(stderr, "[gs-ipc] GS process is exiting\n");
       } else if (type == RecordType::window) {
-        std::fprintf(stderr, "[gs-ipc] GS window event\n");
+        proto::WindowPayload window{};
+        std::memcpy(&window, event.payload, std::min<std::size_t>(sizeof window, event.header->payload_bytes));
+        // macOS: the restored answer to attach_window names the layer context the window shows (Windows: always 0).
+        if (window.state == static_cast<std::uint32_t>(proto::WindowState::restored) && window.layer_id)
+          g_picture_layer_id.store(window.layer_id);
+        std::fprintf(stderr, "[gs-ipc] GS window event (state %u, layer %u)\n", window.state, window.layer_id);
       }
       events.release(event);
     }
@@ -846,6 +932,7 @@ class Client {
   bool dead_ = false;
   bool finished_ = false;
   std::atomic<std::uint64_t> pending_resize_{0};
+  std::atomic<bool> pending_reload_{false};
   void (*halt_)(const char *) = nullptr;
   std::uint64_t window_ = 0;  // game window handle after attach_window (0: headless)
   bool exit_known_ = false;
@@ -921,6 +1008,7 @@ constexpr std::uint64_t kLcAnalog = 32, kLcHdtv = 22, kLcVga = 15;
 
 }  // namespace
 
+#ifdef _WIN32
 bool file_sha256(const std::wstring &path, std::string &hex, std::string &error) {
   HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
@@ -958,6 +1046,35 @@ bool file_sha256(const std::wstring &path, std::string &hex, std::string &error)
   }
   return true;
 }
+#else
+bool file_sha256(const std::string &path, std::string &hex, std::string &error) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    error = "cannot open the file";
+    return false;
+  }
+  CC_SHA256_CTX context;
+  CC_SHA256_Init(&context);
+  std::vector<char> buffer(1 << 20);
+  while (file) {
+    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    if (file.gcount() > 0) CC_SHA256_Update(&context, buffer.data(), static_cast<CC_LONG>(file.gcount()));
+  }
+  if (file.bad()) {
+    error = "read error";
+    return false;
+  }
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {};
+  CC_SHA256_Final(digest, &context);
+  static const char digits[] = "0123456789abcdef";
+  hex.clear();
+  for (unsigned char byte : digest) {
+    hex.push_back(digits[byte >> 4]);
+    hex.push_back(digits[byte & 15]);
+  }
+  return true;
+}
+#endif
 
 bool map_set_gs_crt(std::uint32_t interlace, std::uint32_t mode, std::uint32_t field, std::uint64_t &smode1,
                     std::uint64_t &smode2) {
@@ -1129,9 +1246,16 @@ bool attach_window(std::uint64_t window, std::uint32_t width, std::uint32_t heig
   return true;
 }
 
+std::uint32_t picture_layer_id() { return g_picture_layer_id.load(); }
+
 void resize_window(std::uint32_t width, std::uint32_t height) {
   Client *c = client();
   if (c && c->stream()) c->request_resize(width, height);
+}
+
+void reload_gs_settings() {
+  Client *c = client();
+  if (c && c->stream()) c->request_reload();
 }
 
 void set_cursor_policy(bool auto_hide, std::uint32_t hide_delay_ms) {

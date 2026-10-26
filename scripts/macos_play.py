@@ -9,6 +9,16 @@ launcher's for the built-in renderer: 16:9 at boot, 480p in races, the aspect ra
   private/tooling-venv/bin/python scripts/macos_play.py --fullscreen      play in fullscreen (also Cmd+F, F11, Alt+Enter)
   private/tooling-venv/bin/python scripts/macos_play.py --mute            no sound (the device plays silence)
 
+In-game Graphics menu (docs/BUILD-MACOS.md): when private/macos-graphics-menu/overlay.gt4ovl exists (built by
+scripts/gt4_graphics_menu.py), the game reads its option files through it (GT4_DISC_OVERLAY) and Options > Screen gets
+the Display Mode row; --no-menu-overlay starts without it.
+
+PCSX2 GS renderer (docs/BUILD-MACOS.md, section "GS process"): --renderer pcsx2 draws the picture with gt4-gs, the
+macOS build of the PCSX2 GS process, at a higher internal resolution. Its settings are private/macos-play/gs/gt4-gs.ini
+(created on first use, internal resolution 3x); --upscale N (1 to 12) sets the internal resolution multiplier.
+
+  private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2 --upscale 6
+
 Keyboard (docs/CONTROLS.md): W or Enter accelerate and confirm, S brake, Space handbrake, A/D or the arrows steer and
 move, Backspace or Esc go back, Shift nitro, R/F shift up/down, Q look back, C or Tab camera, P start or pause. Any
 gamepad that SDL3 knows works (Xbox, DualShock 4, DualSense, Switch Pro). Close the window or press Cmd+Q to quit.
@@ -29,6 +39,9 @@ GAME = ROOT / 'private/macos-build/gt4vulkan'
 ELF = ROOT / 'private/reconstructed/SCUS_973.28.elf'
 ISO_NAME = 'Gran Turismo 4 (USA) (v2.00).iso'
 PLAY = ROOT / 'private/macos-play'
+MENU_OVERLAY = ROOT / 'private/macos-graphics-menu/overlay.gt4ovl'
+GS_PROCESS = ROOT / 'private/tooling/gt4gs-build/pcsx2-gt4gs/gt4-gs'
+GS_FOLDER = PLAY / 'gs'
 BACKUPS_KEPT = 10
 
 
@@ -61,6 +74,16 @@ def prepare(card):
     return guest
 
 
+def gs_config(upscale):
+    """The GS process settings (docs/GS-SETTINGS.md): written on first use or when --upscale is given, kept otherwise."""
+    GS_FOLDER.mkdir(parents=True, exist_ok=True)
+    config = GS_FOLDER / 'gt4-gs.ini'
+    if upscale or not config.exists():
+        config.write_text(f'[EmuCore/GS]\nupscale_multiplier = {upscale or 3}\n\n[GT4GS]\nDataRoot = {GS_FOLDER / "data"}\n',
+                          encoding='utf-8')
+    return config
+
+
 def environment(arguments):
     """The launcher's game environment (launcher/crates/gt4l-app launch.rs) for the built-in renderer."""
     values = {key: value for key, value in os.environ.items()
@@ -72,6 +95,12 @@ def environment(arguments):
         values['GT4_MUTE'] = '1'
     if arguments.controls:
         values['GT4_CONTROLS_FILE'] = str(arguments.controls.resolve())
+    if not arguments.no_menu_overlay and arguments.menu_overlay.is_file():
+        values['GT4_DISC_OVERLAY'] = str(arguments.menu_overlay.resolve())
+    if arguments.renderer == 'pcsx2':
+        values['GT4_RENDERER'] = 'pcsx2'
+        values['GT4_GS_PROCESS'] = str(arguments.gs_process.resolve())
+        values['GT4_GS_CONFIG'] = str(gs_config(arguments.upscale))
     return values
 
 
@@ -84,10 +113,22 @@ def main(argv=None):
     parser.add_argument('--controls', type=Path, help='controls file (GT4_CONTROLS_FILE, docs/CONTROLS.md)')
     parser.add_argument('--frames', type=int, default=0, help='stop after this many frames (0: play until closed)')
     parser.add_argument('--log', type=Path, default=PLAY / 'game.log', help='game log file')
+    parser.add_argument('--menu-overlay', type=Path, default=MENU_OVERLAY,
+                        help='in-game Graphics menu overlay, used when the file exists (GT4_DISC_OVERLAY)')
+    parser.add_argument('--no-menu-overlay', action='store_true', help='start without the in-game Graphics menu')
+    parser.add_argument('--renderer', choices=('donor', 'pcsx2'), default='donor',
+                        help='donor: the built-in renderer (default); pcsx2: the GS process gt4-gs (GT4_RENDERER)')
+    parser.add_argument('--gs-process', type=Path, default=GS_PROCESS, help='gt4-gs executable (with --renderer pcsx2)')
+    parser.add_argument('--upscale', type=int, choices=range(1, 13), metavar='N',
+                        help='internal resolution multiplier of gt4-gs, 1 to 12 (kept in private/macos-play/gs/gt4-gs.ini)')
     arguments = parser.parse_args(argv)
     try:
         if not arguments.iso.is_file():
             raise ValueError(f'missing disc image: {arguments.iso}')
+        if arguments.renderer == 'pcsx2' and not arguments.gs_process.is_file():
+            raise ValueError(f'missing GS process {arguments.gs_process}; build it (docs/BUILD-MACOS.md, "GS process")')
+        if arguments.upscale and arguments.renderer != 'pcsx2':
+            raise ValueError('--upscale needs --renderer pcsx2')
         card = arguments.card.resolve()
         guest = prepare(card)
         command = [str(GAME), guest.name, '--ntsc', '--disc', str(arguments.iso.resolve()), '--memcard', str(card),

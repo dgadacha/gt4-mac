@@ -83,8 +83,13 @@ void on_gif_reset();
 // BIOS SetGsCrt: posts the SMODE1/SMODE2 writes the BIOS performs, and SYNCV for the analog NTSC/PAL modes (the
 // donor HLE only records the arguments).
 void on_set_gs_crt(std::uint32_t interlace, std::uint32_t mode, std::uint32_t field);
-// Window: the GS process renders into a child of this window (CONTROL attach_window / resize).
+// Window: the GS process renders into a child of this window (CONTROL attach_window / resize). macOS: window is 0 and
+// the size is in pixels; the GS process answers with its picture layer context (picture_layer_id), which the window
+// shows itself.
 bool attach_window(std::uint64_t window, std::uint32_t width, std::uint32_t height);
+// macOS: the layer context id from the GS process's WINDOW restored answer to attach_window; 0 until it arrives (the
+// client reads events after each VSYNC) and always 0 on Windows. Any thread.
+std::uint32_t picture_layer_id();
 // TASK-060 (protocol 1.2): the mouse cursor policy the game window uses (GT4_CURSOR_AUTOHIDE, native/cursor_autohide.hpp).
 // Call before attach_window; attach_window then sends CONTROL cursor to a 1.2 consumer, so the GS child window hides the
 // cursor over the picture with the same rule. Default: auto-hide on, 3000 ms.
@@ -109,6 +114,10 @@ std::uint32_t aspect_millionths(double ratio);
 // pcsx2 mode); read for the OSD_STATS records. Null: the worker field is not sent.
 void set_worker_busy_source(std::uint64_t (*worker_busy_us)());
 void resize_window(std::uint32_t width, std::uint32_t height);
+// The GS process reads its settings file (GT4_GS_CONFIG) again and applies its GS settings (CONTROL reload_config, sent
+// after the next VSYNC): the in-game Graphics menu changes the internal resolution this way. A GS process that cannot
+// answers with a non-fatal ERROR (gt4-gs.exe before the macOS port). Any thread.
+void reload_gs_settings();
 // Called when the GS process dies, with a reason (the spliced gs.cpp passes ps2::halt).
 void set_halt_handler(void (*halt)(const char *reason));
 // End of the run (donor gs::stats): CONTROL shutdown, wait for the GS process, print the session summary.
@@ -150,8 +159,13 @@ struct OsdSample {
 ::gs_stream::OsdStatsPayload make_osd_stats(const OsdSample &begin, const OsdSample &end, std::uint64_t max_frame_us,
                                             double budget_ms = 1000.0 / 59.94);
 
-// SHA-256 of a file as 64 lowercase hex digits (Windows CNG). Used for the GS process pin (GT4_GS_PROCESS_SHA256).
+// SHA-256 of a file as 64 lowercase hex digits (Windows CNG, macOS CommonCrypto). Used for the GS process pin
+// (GT4_GS_PROCESS_SHA256).
+#ifdef _WIN32
 bool file_sha256(const std::wstring &path, std::string &hex, std::string &error);
+#else
+bool file_sha256(const std::string &path, std::string &hex, std::string &error);
+#endif
 
 // SetGsCrt (interlace, mode, field) to the SMODE1/SMODE2 values the BIOS writes; false for an unknown mode.
 // Same table as the TASK-012 seam (native/gs_video_mode.cpp on task/012-parallel-gs).

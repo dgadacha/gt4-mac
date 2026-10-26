@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "purpose": "Runtime hooks of the in-game Graphics menu (macOS): the donor disc.cpp whose open(path) reads through native/disc_overlay.cpp (GT4_DISC_OVERLAY), and the slice262 license guard dispatch.cpp in which the empty retail natives MSystem.SetDrawPerfMeter and IsDrawPerfMeter run native/menu_bridge.cpp",
+  "tool": "scripts/prepare_menu_runtime.py",
+  "capsule": "private/macos-menu-runtime",
+  "donor_revision": "1b4808793a12c45125262fd2d5f50a9ec9f7c020",
+  "donor_source": "runtime/src/disc.cpp",
+  "donor_sha256": "fc2944cfd3ebd5650cca87ddd588c73d8491319d1192bf07df24bb6d32bba129",
+  "guard_dispatch_source": "private/slice262-license-guard-runtime/dispatch.cpp",
+  "guard_dispatch_sha256": "57412e6a0d060854fecf053c5df626e53122b043d8430440282c6d0d209e85b5",
+  "disc_sha256": "b9ea4c9cd402d8365d1e30142dce1dd381ed5ea1e3b4d19714ccc822c74e592e",
+  "dispatch_sha256": "8128fbadc3d03df8b6582e6d7dda3c6cfe31092a1c9749dd4eed08b1a4616320"
+}

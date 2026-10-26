@@ -14,6 +14,9 @@ Stages, in order. A stage whose output exists is checked against its pins instea
   vu       the VU1 image and its 2,048-program table, the VU0 image and its 14-program table
   runtime  the slice262 runtime capsule, the slice200 memory card capsule and the slice262 license guard capsule
   port     the slice191 GS stream port (gpu.cpp, gpu.hpp, gs.cpp, main.cpp)
+  menu     the in-game Graphics menu hooks: the donor disc.cpp read through native/disc_overlay.cpp
+           (GT4_DISC_OVERLAY) and the license guard dispatch.cpp with the option scripts' host bridge
+           (native/menu_bridge.cpp)
   shaders  the nine SPIR-V compute shaders (tools/wgsl_spirv, naga 30.0.0)
   game     CMake configure and build of gt4vulkan in private/macos-build
 
@@ -60,8 +63,9 @@ RUNTIME_CAPSULE = ROOT / 'private/slice262-frame-cost-runtime'
 MEMCARD_CAPSULE = ROOT / 'private/slice200-memcard-runtime'
 GUARD_CAPSULE = ROOT / 'private/slice262-license-guard-runtime'
 PORT = ROOT / 'private/slice191-gs-stream-port'
+MENU_CAPSULE = ROOT / 'private/macos-menu-runtime'
 SHADERS = ROOT / 'private/slice153-pacing-shaders'
-STAGES = ('ee', 'vu', 'runtime', 'port', 'shaders', 'game')
+STAGES = ('ee', 'vu', 'runtime', 'port', 'menu', 'shaders', 'game')
 
 
 def pins(name):
@@ -298,6 +302,15 @@ def stage_port():
     step('port: slice191 GS stream port verified')
 
 
+def stage_menu():
+    if not MENU_CAPSULE.exists():
+        run([PYTHON, ROOT / 'scripts/prepare_menu_runtime.py', MENU_CAPSULE, '--assets-root', ROOT])
+    pin = pins('macos-menu-runtime.json')
+    require_files(MENU_CAPSULE, {'disc.cpp': pin['disc_sha256'], 'dispatch.cpp': pin['dispatch_sha256'],
+                                 'runtime.json': sha256(MENU_CAPSULE / 'runtime.json')})
+    step('menu: disc overlay and menu bridge hooks verified')
+
+
 def stage_shaders():
     expected = pins('slice262-frame-cost-runtime.json')['inputs']['SHADERS']
     if not SHADERS.exists():
@@ -317,7 +330,8 @@ def stage_game():
          f'-DGT4_PERF_RUNTIME_SOURCE={RUNTIME_CAPSULE}', f'-DGT4_PORT_DIR={PORT}', f'-DGT4_SHADER_DIR={SHADERS}',
          f'-DGT4_VU1_GENERATED_DIR={VU1_TABLE}', f'-DGT4_VU0_GENERATED_DIR={VU0_TABLE}',
          f'-DGT4_VU0_IMAGE_FILE={VU0_IMAGE / "vu0_image.bin"}', f'-DGT4_MEMCARD_RUNTIME_SOURCE={MEMCARD_CAPSULE}',
-         f'-DGT4_LICENSE_GUARD_SOURCE={GUARD_CAPSULE}', '-DGT4_RELEASE_DISTRIBUTION=ON'])
+         f'-DGT4_LICENSE_GUARD_SOURCE={GUARD_CAPSULE}', f'-DGT4_MENU_RUNTIME_SOURCE={MENU_CAPSULE}',
+         '-DGT4_RELEASE_DISTRIBUTION=ON'])
     step('game: building gt4vulkan')
     run(['cmake', '--build', BUILD, '--target', 'gt4vulkan'])
     step(f'game: {(BUILD / "gt4vulkan").relative_to(ROOT)} is ready; start it with scripts/macos_play.py')
@@ -342,6 +356,8 @@ def main(argv=None):
                 stage_runtime()
             elif stage == 'port':
                 stage_port()
+            elif stage == 'menu':
+                stage_menu()
             elif stage == 'shaders':
                 stage_shaders()
             else:

@@ -162,7 +162,7 @@ static_assert(sizeof(ResetPayload) == 16);
 // --- CONTROL ---------------------------------------------------------------------------------------------------
 enum class ControlKind : std::uint32_t {
   shutdown = 1,       // finish the stream, post EXITING, exit
-  attach_window = 2,  // args: native parent window handle (HWND on Windows), width, height
+  attach_window = 2,  // args: native parent window handle (HWND on Windows, 0 on macOS: WindowPayload::layer_id), width, height
   resize = 3,         // args: width, height of the parent client area
   reload_config = 4,  // re-read the consumer's configuration
   snapshot = 5,       // args: snapshot id, width (0 = native), height (0 = native); answered by SNAPSHOT_DONE
@@ -285,7 +285,10 @@ enum class WindowState : std::uint32_t { lost = 1, restored = 2 };
 
 struct WindowPayload {
   std::uint32_t state;  // WindowState
-  std::uint32_t reserved;
+  // macOS: in the restored answer to CONTROL attach_window, the id of the consumer's remote Core Animation context that
+  // holds the picture (sized in pixels, one layer point per pixel); the producer shows it in its own window through a
+  // CALayerHost. 0 everywhere else (Windows: the consumer's window becomes a child of the producer's).
+  std::uint32_t layer_id;
   std::uint64_t reserved2;
 };
 static_assert(sizeof(WindowPayload) == 16);

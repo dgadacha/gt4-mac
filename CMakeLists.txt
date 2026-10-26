@@ -126,6 +126,10 @@ if(WIN32)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME native_shape_capture_export COMMAND $<TARGET_FILE:shape_capture_export_fixture>)
     add_test(NAME native_shape_capture_control COMMAND $<TARGET_FILE:shape_capture_control_fixture>)
+else()
+    # macOS: the POSIX GS stream transport (shared memory, address waits, a child process).
+    add_test(NAME native_gs_stream_ipc COMMAND $<TARGET_FILE:gs_stream_ipc_fixture>)
+    set_tests_properties(native_gs_stream_ipc PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 add_test(NAME python_native_contracts
     COMMAND "${GT4_PYTHON}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/python")

@@ -34,6 +34,13 @@ Version 1.3, P2 amendment (TASK-080 P2, slice217, 2026-10-21): `display_aspect` 
 sent as 0, so a consumer that ignores it (gt4-gs 1.1.0) keeps the earlier behaviour (fill the whole window), and the
 READY minor stays 3. Written by an agent that is not PCSX2-tainted.
 
+macOS port amendment (2026-10-26, docs/BUILD-MACOS.md): the same protocol over POSIX shared memory (section 3.2); on
+macOS CONTROL attach_window carries no window handle and the consumer answers with the id of a remote Core Animation
+context in WINDOW `layer_id` (sections 6.1 and 6.2); CONTROL reload_config is defined (section 6.1). Layouts and the
+READY minor are unchanged: `layer_id` was a reserved word sent as 0, which it stays on Windows, and a consumer that
+does not implement reload_config answers it with a non-fatal ERROR as before. Written by a PCSX2-tainted agent of the
+macOS port; it describes our own records and transport only and contains no PCSX2 code.
+
 ## 1. Scope
 
 The protocol carries GS hardware traffic from a **producer** (the game process, which runs the EE, VU and IOP
@@ -75,6 +82,20 @@ One named file mapping per session, created by the producer:
 | Event ring (consumer -> producer) | 256 KiB | `event_offset`, page aligned |
 
 Ring capacities MUST be multiples of 4,096 bytes. The response capacity MUST be a multiple of 16.
+
+### 3.2 macOS (POSIX)
+
+The transport is `native/gs_stream/gs_stream_ipc_posix.cpp`, with the layout, rings and records of sections 3 to 6:
+
+- Mapping: POSIX shared memory (`shm_open`), named `/<prefix>-<producer pid>-<random hex>` within the 31-character
+  limit of macOS (at least 8 random hex digits). The producer creates it exclusively and unlinks the name when its
+  session ends.
+- Wake-ups: no named events. A side that sleeps waits on its own waiter flag in the control block
+  (`os_sync_wait_on_address` with the shared flag on macOS, a shared futex on Linux); the other side stores 0 in the
+  flag, then wakes it. Slices of at most 100 ms, as in section 5.
+- Peers: process ids. The producer watches its child with `waitpid`; the consumer watches its parent with
+  `getppid()` and `kill(pid, 0)`. A child left running when its handle is destroyed is killed, like the job object of
+  the Windows transport.
 
 ### 3.1 Control block (`ControlBlock`, 4,096 bytes)
 
@@ -154,7 +175,7 @@ timeout error.
 | VSYNC | 3 | `VsyncPayload {u64 frame; u8 field; u8 reserved[3]; u32 flags}` | Start of a vertical blank: every earlier record belongs to the frame that ends here. `frame` counts from 0. When `flags` bit 0 is set, `field` is the **display field** of the frame that ends here: the CSR FIELD bit (bit 13, 1 = odd) a consumer MUST use when it presents that frame, i.e. the field the game prepared that frame's display for. The consumer uses it as is (no shift by one VSYNC). Without bit 0 the consumer alternates the field. (1.0 described it as "the CSR FIELD bit the producer reports to the EE after this VSync"; see section 7 for why both are the same value for our producer.) |
 | READ_FIFO | 4 | `ReadFifoPayload {u32 qwords; u32 reserved; u64 request_id}` | Local-to-host transfer read (the TRXDIR = 1 setup came earlier in the stream). Section 6.4. |
 | RESET | 5 | `ResetPayload {u32 kind; u32 path_mask; u64 reserved}` | kind 1: GS hard reset (power-on state, local memory cleared); kind 2: GIF path parsers in `path_mask` (bit N = path N) return to "waiting for a tag". |
-| CONTROL | 6 | `ControlPayload {u32 kind; u32 reserved; u64 args[3]}` | kind 1 shutdown; 2 attach_window (native parent window handle, width, height); 3 resize (width, height); 4 reload_config; 5 snapshot (id, width, height; 0 = native); 6 cursor (version 1.2: flags, hide delay in ms 1..60000, 0; flag bit 0 `kCursorFlagAutoHide`): the mouse cursor policy for the consumer's window over the picture (section 6.6); 7 display_aspect (version 1.3: mode, 0, 0): how the consumer fits the picture into its window (section 6.7). |
+| CONTROL | 6 | `ControlPayload {u32 kind; u32 reserved; u64 args[3]}` | kind 1 shutdown; 2 attach_window (native parent window handle, 0 on macOS; width, height); 3 resize (width, height); 4 reload_config (macOS port: read the consumer's settings file again and apply its GS settings to the running renderer, for example the internal resolution; ERROR internal when the file cannot be read, ERROR unsupported_record from a consumer without it); 5 snapshot (id, width, height; 0 = native); 6 cursor (version 1.2: flags, hide delay in ms 1..60000, 0; flag bit 0 `kCursorFlagAutoHide`): the mouse cursor policy for the consumer's window over the picture (section 6.6); 7 display_aspect (version 1.3: mode, 0, 0): how the consumer fits the picture into its window (section 6.7). |
 | STATE_SAVE, STATE_LOAD, AUX_FRAME_BEGIN, AUX_FRAME_END | 7-10 | reserved | Not used in 1.0 to 1.2. A consumer answers ERROR `unsupported_record` (not fatal) and ignores them. |
 | OSD_STATS | 11 | `OsdStatsPayload` (64 bytes, section 6.5) | Version 1.2: producer performance numbers for the consumer's on-screen display. Sent only to a consumer that set `kReadyFlagOsdStats`. Not GS traffic: it never changes the picture and is never written to a `.gscap` file. A payload larger than 64 bytes (a later minor version) keeps the 64-byte layout at its start. |
 
@@ -168,7 +189,7 @@ Any other type is a protocol error: the consumer posts a fatal ERROR `bad_record
 | STATS | 0x82 | `StatsPayload {u64 vsyncs, records, bytes, readbacks, readbacks_zero_filled, busy_us, wait_us, reserved}`, cumulative since READY; posted at least every 500 VSYNCs and at shutdown. |
 | ERROR | 0x83 | `ErrorPayload {u32 code; u32 fatal; char text[248]}`; codes 1 version mismatch, 2 layout mismatch, 3 bad record, 4 unsupported record, 5 device failure, 6 internal, 7 bad argument (version 1.3: a known record or CONTROL kind with an argument outside its range; not fatal). |
 | SNAPSHOT_DONE | 0x84 | `SnapshotDonePayload {u64 id; u32 width, height; u64 response_offset; u64 bytes}` (RGBA8 in the response area). |
-| WINDOW | 0x85 | `WindowPayload {u32 state; ...}`: 1 lost, 2 restored. |
+| WINDOW | 0x85 | `WindowPayload {u32 state; u32 layer_id; u64 reserved2}`: 1 lost, 2 restored. macOS: the restored answer to attach_window carries in `layer_id` the id of the remote Core Animation context that holds the picture, sized in pixels with one layer point per pixel; the producer shows it in its window (`CALayerHost`, scaled by the inverse of its backing scale). 0 on Windows, where the consumer's window becomes a child of the producer's. |
 | EXITING | 0x86 | `ExitingPayload {u32 exit_code; ...}`; last record before the consumer exits. |
 
 ### 6.3 Ordering and pacing
