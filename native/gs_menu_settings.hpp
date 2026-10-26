@@ -28,9 +28,11 @@ struct Row {
 // The rows, in the order of the Graphics page (Resolution comes first and is not one of them).
 extern const Row kMetalFX;              // [GT4GS] MetalFX: Off, On
 extern const Row kAnisotropicFiltering; // MaxAnisotropy: Off, 2x, 4x, 8x, 16x
-extern const Row kAntiAliasing;         // fxaa: Off, FXAA
+extern const Row kAntiAliasing;         // fxaa and [GT4GS] SMAA: Off, FXAA, SMAA
 extern const Row kSharpening;           // CASMode and CASSharpness: Off, Low, Medium, High
+extern const Row kBloom;                // [GT4GS] Bloom (percent strength): Off, Low, Medium, High
 extern const Row kColorBoost;           // ShadeBoost and its four levels: Off, Low, Medium, High
+extern const Row kFilmLook;             // [GT4GS] FilmLook: Off, On
 extern const Row kHDR;                  // [GT4GS] HDR: Off, On
 
 // The choice the settings file `text` holds: the first whose values all match the file (a key the file lacks reads as

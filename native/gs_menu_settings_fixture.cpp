@@ -23,7 +23,8 @@ int main() {
   namespace rows = gt4::gs_menu_settings;
   namespace config = gt4::gs_config;
   const rows::Row *all[] = {&rows::kMetalFX,    &rows::kAnisotropicFiltering, &rows::kAntiAliasing,
-                            &rows::kSharpening, &rows::kColorBoost,           &rows::kHDR};
+                            &rows::kSharpening, &rows::kBloom,                &rows::kColorBoost,
+                            &rows::kFilmLook,   &rows::kHDR};
   const std::string file = "[EmuCore/GS]\nupscale_multiplier = 5\n\n[GT4GS]\nDataRoot = /data\n";
 
   for (const rows::Row *row : all) {
@@ -45,11 +46,18 @@ int main() {
   expect(rows::current_choice(rows::kAntiAliasing, file) == 0, "FXAA is off by default");
   expect(rows::current_choice(rows::kSharpening, file) == 0, "CAS is off by default");
   expect(rows::current_choice(rows::kColorBoost, file) == 0, "shade boost is off by default");
+  expect(rows::current_choice(rows::kBloom, file) == 0, "bloom is off by default");
+  expect(rows::current_choice(rows::kFilmLook, file) == 0, "the film look is off by default");
   expect(rows::current_choice(rows::kHDR, file) == 0, "HDR is off by default");
 
   // The values the GS process reads.
   const std::string sixteen = rows::with_choice(rows::kAnisotropicFiltering, file, 4);
   expect(config::value(sixteen, "EmuCore/GS", "MaxAnisotropy") == "16", "16x writes MaxAnisotropy = 16");
+  const std::string smaa = rows::with_choice(rows::kAntiAliasing, rows::with_choice(rows::kAntiAliasing, file, 1), 2);
+  expect(config::value(smaa, "EmuCore/GS", "fxaa") == "false" && config::value(smaa, "GT4GS", "SMAA") == "true",
+         "SMAA turns FXAA off");
+  const std::string glow = rows::with_choice(rows::kBloom, file, 2);
+  expect(config::value(glow, "GT4GS", "Bloom") == "40", "medium bloom writes [GT4GS] Bloom = 40");
   const std::string hdr = rows::with_choice(rows::kHDR, file, 1);
   expect(config::value(hdr, "GT4GS", "HDR") == "true", "HDR on writes [GT4GS] HDR = true");
   const std::string sharp = rows::with_choice(rows::kSharpening, file, 3);

@@ -30,13 +30,20 @@ const Row kAnisotropicFiltering{"anisotropic filtering",
                                 {"off", "2x", "4x", "8x", "16x"},
                                 {{"0"}, {"2"}, {"4"}, {"8"}, {"16"}}};
 
-const Row kAntiAliasing{"anti-aliasing", {{kGS, "fxaa", "false"}}, {"off", "FXAA"}, {{"false"}, {"true"}}};
+// FXAA of PCSX2, or SMAA 1x of the macOS gt4-gs: one at a time.
+const Row kAntiAliasing{"anti-aliasing",
+                        {{kGS, "fxaa", "false"}, {kGT4GS, "SMAA", "false"}},
+                        {"off", "FXAA", "SMAA"},
+                        {{"false", "false"}, {"true", "false"}, {"false", "true"}}};
 
 // FidelityFX CAS, sharpen only (MetalFX does the enlarging); CASSharpness 0 to 100.
 const Row kSharpening{"sharpening",
                       {{kGS, "CASMode", "0"}, {kGS, "CASSharpness", "50"}},
                       {"off", "low", "medium", "high"},
                       {{"0", nullptr}, {"1", "25"}, {"1", "50"}, {"1", "100"}}};
+
+// The glow around the picture's bright parts (macOS gt4-gs), in percent strength.
+const Row kBloom{"bloom", {{kGT4GS, "Bloom", "0"}}, {"off", "low", "medium", "high"}, {{"0"}, {"20"}, {"40"}, {"70"}}};
 
 // Shade boost: brightness, contrast, saturation and gamma, 50 being neutral (the shader multiplies by level / 50).
 // Contrast stays low: GT4's picture is short of saturation, and more contrast darkens its shadows.
@@ -51,6 +58,9 @@ const Row kColorBoost{"color boost",
                        {"true", "50", "52", "57", "50"},
                        {"true", "50", "54", "64", "50"},
                        {"true", "50", "56", "72", "50"}}};
+
+// A film-like tone curve, cool shadows and warm highlights, and a light vignette (macOS gt4-gs).
+const Row kFilmLook{"film look", {{kGT4GS, "FilmLook", "false"}}, {"off", "on"}, {{"false"}, {"true"}}};
 
 const Row kHDR{"HDR", {{kGT4GS, "HDR", "false"}}, {"off", "on"}, {{"false"}, {"true"}}};
 

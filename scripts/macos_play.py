@@ -17,7 +17,8 @@ PCSX2 GS renderer (docs/BUILD-MACOS.md, section "GS process"): --renderer pcsx2 
 macOS build of the PCSX2 GS process, at a higher internal resolution. Its settings are private/macos-play/gs/gt4-gs.ini
 (created on first use, internal resolution 3x); --upscale N (1 to 12) sets the internal resolution multiplier,
 --hdr on|off the HDR output on an EDR display and --metalfx on|off the MetalFX upscaling. The game's Options > Graphics
-page changes them and the others (texture filtering, anti-aliasing, sharpening, colors) while playing.
+page changes them and the others (texture filtering, anti-aliasing, sharpening, bloom, colors, film look) while
+playing.
 
   private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2 --upscale 6 --hdr on
 

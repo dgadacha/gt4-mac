@@ -56,9 +56,11 @@ enum SettingId : int {
   kMetalFX = 5,               // PCSX2 GS renderer: 0 off, 1 MetalFX upscaling to the screen
   // PCSX2 GS renderer, the choices of gs_menu_settings.hpp:
   kAnisotropicFiltering = 30, // 0 off, 1 2x, 2 4x, 3 8x, 4 16x
-  kAntiAliasing = 31,         // 0 off, 1 FXAA
+  kAntiAliasing = 31,         // 0 off, 1 FXAA, 2 SMAA (macOS gt4-gs)
   kSharpening = 32,           // 0 off, 1 low, 2 medium, 3 high (FidelityFX CAS)
   kColorBoost = 33,           // 0 off, 1 low, 2 medium, 3 high (shade boost)
+  kBloom = 34,                // 0 off, 1 low, 2 medium, 3 high (macOS gt4-gs)
+  kFilmLook = 35,             // 0 off, 1 on (macOS gt4-gs)
 };
 
 struct Setting {

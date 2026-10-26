@@ -293,7 +293,7 @@ void register_resolution_setting() {
 }
 
 // GT4_RENDERER=pcsx2: a row of the Graphics page that writes keys of the GS process's settings file
-// (gs_menu_settings.hpp: MetalFX, anisotropic filtering, FXAA, CAS, shade boost, HDR), applied like the resolution (the file is
+// (gs_menu_settings.hpp: MetalFX, anisotropic filtering, FXAA, CAS, bloom, shade boost, film look, HDR), applied like the resolution (the file is
 // rewritten and the GS process reads it again).
 void register_gs_row(int id, const gt4::gs_menu_settings::Row &row) {
   const char *path = std::getenv("GT4_GS_CONFIG");
@@ -340,7 +340,9 @@ void register_menu_settings() {
   register_gs_row(bridge::kAnisotropicFiltering, rows::kAnisotropicFiltering);
   register_gs_row(bridge::kAntiAliasing, rows::kAntiAliasing);
   register_gs_row(bridge::kSharpening, rows::kSharpening);
+  register_gs_row(bridge::kBloom, rows::kBloom);
   register_gs_row(bridge::kColorBoost, rows::kColorBoost);
+  register_gs_row(bridge::kFilmLook, rows::kFilmLook);
   register_gs_row(bridge::kHDR, rows::kHDR);
 }
 

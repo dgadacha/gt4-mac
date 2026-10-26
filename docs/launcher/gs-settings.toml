@@ -1329,3 +1329,50 @@ default = "false"
 written = "when-set"
 status = "ok"
 notes = "macOS port of gt4-gs: MetalFX spatial scaler (macOS 13 or later) from the internal resolution to the picture's display rectangle, before CAS and the presentation; skipped when the picture is not smaller than that rectangle on both axes."
+
+[[setting]]
+id = "bloom"
+label = "Bloom"
+help = "macOS: glow around the picture's bright parts (sun, sky, lights, reflections), in percent strength (0 is off)."
+page = "hidden"
+order = 27
+control = "slider"
+section = "GT4GS"
+key = "Bloom"
+type = "int"
+min = 0
+max = 100
+default = "0"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs: the light above a soft threshold, filtered down six half-size levels and back up, screen-blended over the merged picture after shade boost and FXAA (GSDeviceMTL::ApplyGT4Look). The game's Graphics menu writes 0, 20, 40 or 70."
+
+[[setting]]
+id = "film_look"
+label = "Film look"
+help = "macOS: a gentle film-like tone curve, cool shadows and warm highlights, and a light vignette."
+page = "hidden"
+order = 28
+control = "toggle"
+section = "GT4GS"
+key = "FilmLook"
+type = "bool"
+default = "false"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs: applied with the bloom, after shade boost and FXAA (GSDeviceMTL::ApplyGT4Look)."
+
+[[setting]]
+id = "smaa"
+label = "SMAA"
+help = "macOS: SMAA 1x antialiasing of the picture (sharper than FXAA). Use one of the two."
+page = "hidden"
+order = 29
+control = "toggle"
+section = "GT4GS"
+key = "SMAA"
+type = "bool"
+default = "false"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs: a Metal port of the reference SMAA 1x (github.com/iryoku/smaa, MIT; High preset), on the merged picture after shade boost and FXAA, before the bloom and film look (GSDeviceMTL::ApplyGT4Look). The game's Graphics menu writes it with fxaa off."

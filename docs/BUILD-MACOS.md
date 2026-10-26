@@ -127,19 +127,28 @@ same widgets:
 | Resolution | Native (the PS2 picture), then the common resolutions that fit in the screen (1280x720, 1920x1080, 2560x1440, 3840x2160) and the screen's own, for example 3024x1964 on a 14-inch MacBook Pro | `upscale_multiplier` |
 | MetalFX Upscaling | Off, On (see [HDR and MetalFX](#hdr-and-metalfx)) | `[GT4GS] MetalFX` |
 | Anisotropic Filtering | Off, 2x, 4x, 8x, 16x | `MaxAnisotropy` |
-| Anti-Aliasing | Off, FXAA | `fxaa` |
+| Anti-Aliasing | Off, FXAA, SMAA (sharper: it only blends the edges it finds) | `fxaa` or `[GT4GS] SMAA` |
 | Sharpening | Off, Low, Medium, High (FidelityFX CAS, sharpen only) | `CASMode` 1 and `CASSharpness` 25, 50, 100 |
+| Bloom | Off, Low, Medium, High: a glow around the sky, the lights and the reflections | `[GT4GS] Bloom` 0, 20, 40, 70 (percent) |
 | Color Boost | Off, Low, Medium, High (shade boost) | `ShadeBoost`, contrast 52, 54, 56 and saturation 57, 64, 72 (50 is neutral) |
+| Film Look | Off, On: a gentle S-curve, cool shadows and warm highlights, a light vignette | `[GT4GS] FilmLook` |
 | HDR | Off, On | `[GT4GS] HDR` |
+
+SMAA, Bloom and Film Look are effects of the macOS `gt4-gs` (`gt4smaa.metal`, `gt4look.metal`,
+`GSDeviceMTL::ApplyGT4Look`), applied to the picture at the internal resolution after shade boost and FXAA, in that
+order. SMAA is SMAA 1x, a Metal port of the reference implementation (github.com/iryoku/smaa, MIT, "High" preset) with
+its lookup textures (`3rdparty/smaa` of the fork). Bloom takes the light above a soft threshold (linear
+light 0.5, sRGB 0.73), filters it down six half-size levels and back up, and screen-blends it over the picture, which
+cannot go past white. Being part of the picture, the HUD glows too.
 
 Cost, measured on an M3 Pro with the race replay at 5x (frames 3,600 to 6,000, without a window): 4.7 to 5.0 ms of
 GS work per frame with none of these effects, 7.2 to 7.7 ms with 16x filtering, FXAA, High sharpening and Medium
-color boost together. There is no dithering row: PCSX2's `dithering_ps2 = 0` changes no pixel of the replay (119
+color boost together, 6.1 to 6.4 ms with High bloom and the film look alone, 5.3 to 5.6 ms with SMAA alone. There is no dithering row: PCSX2's `dithering_ps2 = 0` changes no pixel of the replay (119
 frames compared from boot to race at 1x), so GT4 does not use the GS dithering there.
 
 The choices apply within a few frames and are kept in the GS process's settings file; a value written there by hand
 that no choice writes shows as the default choice. Cancel on the page restores what the page opened with. The page's
-panel sits higher than the Screen page's so that its seven rows stay above the tooltip bar. Without the renderer's
+panel sits higher than the Screen page's so that its nine rows stay above the tooltip bar. Without the renderer's
 settings (the built-in renderer), neither the tile nor its row shows.
 
 The Graphics page lives in the slot of a page the disc ships unused, Camera (`CameraRoot`): its images

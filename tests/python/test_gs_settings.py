@@ -63,8 +63,8 @@ class TableSchemaTests(unittest.TestCase):
         table = rows()
         # 71 rows, plus textures_folder (TASK-088, launcher row) and the three hidden macOS presentation rows (hdr,
         # hdr_peak, metalfx).
-        self.assertEqual(len(table), 75)
-        self.assertEqual(len({row['id'] for row in table}), 75)
+        self.assertEqual(len(table), 78)
+        self.assertEqual(len({row['id'] for row in table}), 78)
 
     def test_every_row_has_the_documented_columns(self):
         for row in rows():
