@@ -670,7 +670,8 @@ def prepare(output, assets_root=None, *, split_vu=False, vu1_aot=False, vu0_aot=
         path = output / name
         path.write_text(text, encoding='utf-8', newline='\n')
         receipt['source_sha256'][name] = hashlib.sha256(path.read_bytes()).hexdigest()
-    (output / 'runtime.json').write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
+    # The pinned receipts were written in Windows text mode (CRLF); explicit, so every platform writes the same bytes.
+    (output / 'runtime.json').write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8', newline='\r\n')
     return receipt
 
 

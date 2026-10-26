@@ -2,6 +2,10 @@
 #include "gs/raster.hpp"
 #include "native_vulkan.hpp"
 
+#if !defined(_WIN32)
+#include <SDL3/SDL.h>
+#endif
+
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -245,14 +249,25 @@ int main() {
     if (!oversize_refused)
       throw std::runtime_error(
           "Oversized display escaped scratch capacity check");
+#if defined(_WIN32)
     HWND window = CreateWindowExW(0, L"STATIC", L"Vulkan presentation fixture",
                                   WS_OVERLAPPEDWINDOW, 0, 0, 160, 120, nullptr,
                                   nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!window)
       throw std::runtime_error("Cannot create fixture window");
-    gpu::attach_surface({gpu::SurfaceTarget::Win32, nullptr,
-                         reinterpret_cast<std::uint64_t>(window), nullptr,
-                         nullptr, 160, 120});
+    const auto surface_handle = reinterpret_cast<std::uint64_t>(window);
+#else
+    // macOS: an SDL3 window with a Metal view; its CAMetalLayer is the surface handle (native_vulkan.hpp).
+    if (!SDL_Init(SDL_INIT_VIDEO))
+      throw std::runtime_error(std::string("SDL_Init(SDL_INIT_VIDEO) failed: ") + SDL_GetError());
+    SDL_Window *window = SDL_CreateWindow("Vulkan presentation fixture", 160, 120, SDL_WINDOW_METAL);
+    SDL_MetalView view = window ? SDL_Metal_CreateView(window) : nullptr;
+    if (!view)
+      throw std::runtime_error(std::string("Cannot create fixture window: ") + SDL_GetError());
+    const auto surface_handle = reinterpret_cast<std::uint64_t>(SDL_Metal_GetLayer(view));
+#endif
+    gpu::attach_surface({gpu::SurfaceTarget::Win32, nullptr, surface_handle,
+                         nullptr, nullptr, 160, 120});
     const gpu::DisplaySource display_source{0, 1, PSMCT32, 0, 0, 64, 64, false};
     for (int repeat = 0; repeat < 12; ++repeat)
       if (!gpu::present(display_source))
@@ -260,7 +275,12 @@ int main() {
     gpu::resize_surface(0, 0);
     if (gpu::present(display_source))
       throw std::runtime_error("Zero-sized surface presented unexpectedly");
+#if defined(_WIN32)
     SetWindowPos(window, nullptr, 0, 0, 240, 180, SWP_NOACTIVATE | SWP_NOMOVE);
+#else
+    SDL_SetWindowSize(window, 240, 180);
+    SDL_SyncWindow(window);
+#endif
     gpu::resize_surface(240, 180);
     if (!gpu::present(display_source))
       throw std::runtime_error("Restored resized surface refused presentation");
@@ -269,9 +289,14 @@ int main() {
       if (!gpu::present(source))
         throw std::runtime_error("Widescreen resolution presentation refused");
     }
+#if defined(_WIN32)
     DestroyWindow(window);
+#else
+    SDL_Metal_DestroyView(view);
+    SDL_DestroyWindow(window);
+#endif
     std::fprintf(stderr,
-                 "[fixture] Win32 repeat/zero-size/resize restore passed\n");
+                 "[fixture] window repeat/zero-size/resize restore passed\n");
     gpu::stats();
     std::fprintf(stderr,
                  "[fixture] PASS: real Vulkan raster/display/readback\n");

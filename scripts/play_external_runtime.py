@@ -2,13 +2,34 @@
 from datetime import datetime
 import argparse
 import json
-import msvcrt
 import os
 from pathlib import Path
 import sys
 
 from external_runtime_probe import (ROOT, VU1_CORPUS_NAME, binary_workspace_for, run_probe, separate_play_card,
                                     verify_manual_capture_profile, verify_performance_profile)
+
+if os.name == 'nt':
+    import msvcrt
+else:
+    import fcntl
+
+
+def lock_session_byte(lock):
+    """Locks the open session lock file without waiting; OSError when another open of it holds the lock.
+    Windows locks the first byte (msvcrt), POSIX the whole file (flock, held per open file like the Windows lock).
+    Both are released when the process ends, even after a crash."""
+    if os.name == 'nt':
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def unlock_session_byte(lock):
+    if os.name == 'nt':
+        msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def play(assets_root=None, runtime_manifest=None, capture_shapes=False, performance=False, vu1_record=False,
@@ -24,14 +45,14 @@ def play(assets_root=None, runtime_manifest=None, capture_shapes=False, performa
     if not play_directory.resolve().is_relative_to((workspace / 'private').resolve()):
         raise ValueError('Manual play directory must remain inside private/')
     play_directory.mkdir(parents=True, exist_ok=True)
-    # Windows releases this byte lock even when the launcher process crashes.
+    # The system releases this byte lock even when the launcher process crashes.
     with (play_directory / 'session.lock').open('a+b') as lock:
         if lock.tell() == 0:
             lock.write(b'0')
             lock.flush()
         lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            lock_session_byte(lock)
         except OSError as error:
             raise ValueError('Another manual game session is already running') from error
         try:
@@ -94,7 +115,7 @@ def play(assets_root=None, runtime_manifest=None, capture_shapes=False, performa
                 restart = False
         finally:
             lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            unlock_session_byte(lock)
     if restart:
         # TASK-038: the player answered "yes" in the GS failure message box; same build, built-in renderer.
         print(f'GS process stopped; restarting with the built-in renderer (CoreGS 1.1). Previous log: {run_directory}',

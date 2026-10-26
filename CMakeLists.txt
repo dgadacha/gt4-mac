@@ -1,11 +1,18 @@
 cmake_minimum_required(VERSION 3.24)
 project(GT4Recomp VERSION 0.2.0 LANGUAGES CXX)
 
-if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "The qualified target is Windows x86-64")
-endif()
-if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT MSVC)
-    message(FATAL_ERROR "Use clang-cl with the Visual Studio x64 environment")
+if(APPLE)
+    # macOS on Apple silicon: Apple clang, with SDL3 and MoltenVK from Homebrew (docs/BUILD-MACOS.md).
+    if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "The macOS build targets Apple silicon (arm64) with clang")
+    endif()
+else()
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "The qualified target is Windows x86-64")
+    endif()
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT MSVC)
+        message(FATAL_ERROR "Use clang-cl with the Visual Studio x64 environment")
+    endif()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -19,21 +26,37 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # executables and the tables they link agree. Pinned EE game library (ps2game.lib) is not affected.
 option(GT4_FP_CONTRACT_OFF "Build with -ffp-contract=off (control: no fused multiply-add)" OFF)
 option(GT4_X86_64_V3 "Build for x86-64-v3 (AVX2, FMA); implies GT4_FP_CONTRACT_OFF" OFF)
-if(GT4_FP_CONTRACT_OFF OR GT4_X86_64_V3)
-    add_compile_options(/clang:-ffp-contract=off)
-endif()
-if(GT4_X86_64_V3)
-    add_compile_options(/clang:-march=x86-64-v3)
+if(APPLE)
+    # The arithmetic of the Windows build: ARM64 always has fused multiply-add, which clang would otherwise use for
+    # a * b + c (x86-64 without -march has none), and clang-cl does not apply type-based alias analysis.
+    add_compile_options(-ffp-contract=off -fno-strict-aliasing)
+    set(GT4_WARNING_FLAGS -Wall)
+else()
+    if(GT4_FP_CONTRACT_OFF OR GT4_X86_64_V3)
+        add_compile_options(/clang:-ffp-contract=off)
+    endif()
+    if(GT4_X86_64_V3)
+        add_compile_options(/clang:-march=x86-64-v3)
+    endif()
+    set(GT4_WARNING_FLAGS /W4)
 endif()
 # enable_testing() comes before the subdirectories so their add_test() calls register (native_memcard_store,
 # native_license_guard).
 enable_testing()
 add_subdirectory(native)
 add_subdirectory(tools/vu_recomp)
-add_subdirectory(tools/gs_stream_record)
-add_subdirectory(tools/gs_live_check)
+if(WIN32)
+    # The GS stream recorder and live check talk to the Windows GS process.
+    add_subdirectory(tools/gs_stream_record)
+    add_subdirectory(tools/gs_live_check)
+endif()
 
-set(GT4_PYTHON "${CMAKE_SOURCE_DIR}/private/tooling-venv/Scripts/python.exe"
+if(WIN32)
+    set(GT4_DEFAULT_PYTHON "${CMAKE_SOURCE_DIR}/private/tooling-venv/Scripts/python.exe")
+else()
+    set(GT4_DEFAULT_PYTHON "${CMAKE_SOURCE_DIR}/private/tooling-venv/bin/python")
+endif()
+set(GT4_PYTHON "${GT4_DEFAULT_PYTHON}"
     CACHE FILEPATH "Python environment with scripts/requirements.txt installed")
 if(NOT EXISTS "${GT4_PYTHON}")
     message(FATAL_ERROR "Missing GT4_PYTHON environment; see docs/BUILD.md")
@@ -63,13 +86,17 @@ set_tests_properties(native_vulkan_async_stress_async PROPERTIES ENVIRONMENT "GT
 set_tests_properties(native_vulkan_async_stress_sync PROPERTIES ENVIRONMENT "GT4_GS_SYNC=1")
 set_tests_properties(native_vulkan_async_stress_compare PROPERTIES DEPENDS
     "native_vulkan_async_stress_async;native_vulkan_async_stress_sync")
-add_test(NAME native_audio_input COMMAND $<TARGET_FILE:host_io_fixture>)
+if(WIN32)
+    add_test(NAME native_audio_input COMMAND $<TARGET_FILE:host_io_fixture>)
+endif()
 add_test(NAME native_controls COMMAND $<TARGET_FILE:controls_fixture>)
 add_test(NAME native_pad_mapping COMMAND $<TARGET_FILE:pad_mapping_fixture>)
 add_test(NAME native_pacing COMMAND $<TARGET_FILE:pacing_fixture>)
-add_test(NAME native_achievements COMMAND $<TARGET_FILE:achievements_fixture>)
-add_test(NAME native_achievements_http COMMAND $<TARGET_FILE:achievements_http_fixture>)
-set_tests_properties(native_achievements native_achievements_http PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
+if(WIN32)
+    add_test(NAME native_achievements COMMAND $<TARGET_FILE:achievements_fixture>)
+    add_test(NAME native_achievements_http COMMAND $<TARGET_FILE:achievements_http_fixture>)
+    set_tests_properties(native_achievements native_achievements_http PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
+endif()
 add_test(NAME native_quickfix COMMAND $<TARGET_FILE:quickfix_fixture>)
 add_test(NAME native_race_display COMMAND $<TARGET_FILE:race_display_fixture>)
 add_test(NAME native_race_widescreen COMMAND $<TARGET_FILE:race_widescreen_fixture>)
@@ -89,19 +116,38 @@ add_test(NAME native_mtvu_perf COMMAND $<TARGET_FILE:mtvu_perf_fixture>)
 add_test(NAME native_mtvu_vif_batch COMMAND $<TARGET_FILE:mtvu_vif_batch_fixture>)
 # TASK-092: GT4_MTVU=0 / GT4_MTVU_VERIFY=1 decision (one condition for the GS client deferral and vblank_sync).
 add_test(NAME native_mtvu_switches COMMAND $<TARGET_FILE:mtvu_switch_fixture>)
-# TASK-035: GS stream transport (threads and a child process) and the game-side client end to end with the recorder.
-add_test(NAME native_gs_stream_ipc COMMAND $<TARGET_FILE:gs_stream_ipc_fixture>)
-add_test(NAME native_gs_stream_client
-    COMMAND $<TARGET_FILE:gs_stream_client_fixture> $<TARGET_FILE:gs_stream_record> "${CMAKE_BINARY_DIR}/gs-stream-client-scratch")
-set_tests_properties(native_gs_stream_ipc native_gs_stream_client PROPERTIES RUN_SERIAL TRUE TIMEOUT 300
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-add_test(NAME native_shape_capture_export COMMAND $<TARGET_FILE:shape_capture_export_fixture>)
-add_test(NAME native_shape_capture_control COMMAND $<TARGET_FILE:shape_capture_control_fixture>)
+if(WIN32)
+    # TASK-035: GS stream transport (threads and a child process) and the game-side client end to end with the
+    # recorder.
+    add_test(NAME native_gs_stream_ipc COMMAND $<TARGET_FILE:gs_stream_ipc_fixture>)
+    add_test(NAME native_gs_stream_client
+        COMMAND $<TARGET_FILE:gs_stream_client_fixture> $<TARGET_FILE:gs_stream_record> "${CMAKE_BINARY_DIR}/gs-stream-client-scratch")
+    set_tests_properties(native_gs_stream_ipc native_gs_stream_client PROPERTIES RUN_SERIAL TRUE TIMEOUT 300
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    add_test(NAME native_shape_capture_export COMMAND $<TARGET_FILE:shape_capture_export_fixture>)
+    add_test(NAME native_shape_capture_control COMMAND $<TARGET_FILE:shape_capture_control_fixture>)
+endif()
 add_test(NAME python_native_contracts
     COMMAND "${GT4_PYTHON}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/python")
-set_tests_properties(native_mtvu_measure native_mtvu_ring native_mtvu_journal native_mtvu_perf native_mtvu_vif_batch native_quickfix native_race_display native_race_widescreen native_vulkan_pixels native_audio_input native_shape_observer native_performance_accounting native_performance_probe native_shape_capture_export native_shape_capture_control python_native_contracts
+set(GT4_SERIAL_TESTS native_mtvu_measure native_mtvu_ring native_mtvu_journal native_mtvu_perf native_mtvu_vif_batch
+    native_quickfix native_race_display native_race_widescreen native_vulkan_pixels native_shape_observer
+    native_performance_accounting native_performance_probe python_native_contracts)
+if(WIN32)
+    list(APPEND GT4_SERIAL_TESTS native_audio_input native_shape_capture_export native_shape_capture_control)
+endif()
+set_tests_properties(${GT4_SERIAL_TESTS}
     PROPERTIES RUN_SERIAL TRUE TIMEOUT 120
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" ENVIRONMENT "GT4_NATIVE_BUILD=${CMAKE_BINARY_DIR}")
+if(APPLE)
+    # macOS reaches the per-user temporary folder through the /var -> /private/var link, which the canonical-path
+    # checks of the tools refuse (a linked ancestor): the tests get the resolved folder.
+    if(DEFINED ENV{TMPDIR})
+        file(REAL_PATH "$ENV{TMPDIR}" GT4_TEST_TMPDIR)
+    else()
+        file(REAL_PATH "/tmp" GT4_TEST_TMPDIR)
+    endif()
+    set_property(TEST python_native_contracts APPEND PROPERTY ENVIRONMENT "TMPDIR=${GT4_TEST_TMPDIR}")
+endif()
 if(TARGET shape_runtime_fixture)
     add_test(NAME native_shape_runtime COMMAND $<TARGET_FILE:shape_runtime_fixture>)
     set_tests_properties(native_shape_runtime PROPERTIES RUN_SERIAL TRUE TIMEOUT 120

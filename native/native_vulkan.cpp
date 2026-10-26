@@ -18,6 +18,10 @@
 #include "pacing.hpp"
 #include "vulkan_extensions.hpp"
 
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
+
 namespace gt4::vulkan {
 namespace {
 VkPresentModeKHR vulkan_present_mode(gt4::pacing::PresentMode mode) {
@@ -76,6 +80,20 @@ void set_race_view_presentation(bool fill, double ratio) {
 }
 
 namespace {
+// set_interlaced_presentation.
+std::atomic<bool> g_blend_fields{false};
+} // namespace
+
+void set_interlaced_presentation(bool blend_fields) { g_blend_fields.store(blend_fields); }
+
+namespace {
+
+// The surface entry point of the platform's game window.
+#if defined(_WIN32)
+#define VULKAN_SURFACE_FUNCTION(X) X(vkCreateWin32SurfaceKHR)
+#else
+#define VULKAN_SURFACE_FUNCTION(X) X(vkCreateMetalSurfaceEXT)
+#endif
 
 // Only the Vulkan entry points used by this backend are resolved from the
 // loader.
@@ -113,7 +131,7 @@ namespace {
   X(vkCmdBindPipeline) \
   X(vkCmdBindDescriptorSets) \
   X(vkCmdDispatch) \
-  X(vkCreateWin32SurfaceKHR) \
+  VULKAN_SURFACE_FUNCTION(X) \
   X(vkGetPhysicalDeviceSurfaceSupportKHR) \
   X(vkGetPhysicalDeviceSurfaceFormatsKHR) \
   X(vkGetPhysicalDeviceSurfacePresentModesKHR) \
@@ -123,6 +141,8 @@ namespace {
   X(vkCreateImage) \
   X(vkBindImageMemory) \
   X(vkCmdCopyBufferToImage) \
+  X(vkCmdCopyImage) \
+  X(vkCmdCopyImageToBuffer) \
   X(vkCmdBlitImage) \
   X(vkCmdClearColorImage) \
   X(vkGetPhysicalDeviceFeatures2) \
@@ -227,8 +247,13 @@ Context::~Context() {
     vkDestroySurfaceKHR(instance_, surface_, nullptr);
   if (instance_ && vkDestroyInstance)
     vkDestroyInstance(instance_, nullptr);
+#if defined(_WIN32)
   if (loader_)
     FreeLibrary(loader_);
+#else
+  if (loader_)
+    dlclose(loader_);
+#endif
 }
 
 void Context::initialize(const std::filesystem::path &build_time_shaders) {
@@ -254,12 +279,45 @@ void Context::initialize(const std::filesystem::path &build_time_shaders) {
     else if (std::strcmp(sync, "0") != 0)
       throw std::runtime_error("GT4_GS_SYNC must be 0 or 1");
   }
+  if (const char *dump = std::getenv("GT4_PRESENT_DUMP"); dump && *dump) {
+    dump_directory_ = dump;
+    std::filesystem::create_directories(dump_directory_);
+    const char *frames = std::getenv("GT4_PRESENT_DUMP_FRAMES");
+    unsigned long long first = 0, last = 0;
+    if (!frames || std::sscanf(frames, "%llu:%llu", &first, &last) != 2 || last < first)
+      throw std::runtime_error("GT4_PRESENT_DUMP needs GT4_PRESENT_DUMP_FRAMES=first:last");
+    dump_first_ = first;
+    dump_last_ = last;
+    std::fprintf(stderr, "[vulkan] presentations %llu-%llu dumped to %s\n", first, last, dump_directory_.string().c_str());
+  }
+#if defined(_WIN32)
   loader_ =
       LoadLibraryExW(L"vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
   if (!loader_)
     throw std::runtime_error("Vulkan loader unavailable in System32");
   const auto get_instance = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
       GetProcAddress(loader_, "vkGetInstanceProcAddr"));
+#else
+  // macOS: the Vulkan loader next to the executable (a packaged game), then the Homebrew loader (vulkan-loader, which
+  // finds the molten-vk driver), then MoltenVK itself, which also exports vkGetInstanceProcAddr.
+  {
+    const std::filesystem::path beside = gt4::install::executable_directory() / "libvulkan.1.dylib";
+    const std::string candidates[] = {beside.string(), "libvulkan.1.dylib", "/opt/homebrew/lib/libvulkan.1.dylib",
+                                      "/usr/local/lib/libvulkan.1.dylib", "libMoltenVK.dylib",
+                                      "/opt/homebrew/lib/libMoltenVK.dylib"};
+    for (const auto &candidate : candidates) {
+      loader_ = dlopen(candidate.c_str(), RTLD_NOW | RTLD_LOCAL);
+      if (loader_) {
+        std::fprintf(stderr, "[vulkan] loader: %s\n", candidate.c_str());
+        break;
+      }
+    }
+  }
+  if (!loader_)
+    throw std::runtime_error("Vulkan loader unavailable; install it with: brew install vulkan-loader molten-vk");
+  const auto get_instance = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+      dlsym(loader_, "vkGetInstanceProcAddr"));
+#endif
   if (!get_instance)
     throw std::runtime_error("Vulkan loader lacks vkGetInstanceProcAddr");
   vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(
@@ -301,6 +359,8 @@ void Context::initialize(const std::filesystem::path &build_time_shaders) {
     extensions.push_back(name.c_str());
   VkInstanceCreateInfo instance_info{};
   instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  if (instance_choice.portability_enumeration)
+    instance_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
   instance_info.pApplicationInfo = &application;
   instance_info.enabledExtensionCount =
       static_cast<std::uint32_t>(extensions.size());
@@ -852,23 +912,31 @@ void Context::wait_idle() {
 void Context::attach_window(HWND window, std::uint32_t width,
                             std::uint32_t height) {
   if (!window || window_)
-    throw std::runtime_error("Invalid or already attached Win32 window");
+    throw std::runtime_error("Invalid or already attached game window");
   window_ = window;
   window_width_ = width;
   window_height_ = height;
+#if defined(_WIN32)
   VkWin32SurfaceCreateInfoKHR info{};
   info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
   info.hinstance = GetModuleHandleW(nullptr);
   info.hwnd = window;
   check(vkCreateWin32SurfaceKHR(instance_, &info, nullptr, &surface_),
         "Win32 Vulkan surface");
+#else
+  VkMetalSurfaceCreateInfoEXT info{};
+  info.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+  info.pLayer = static_cast<const CAMetalLayer *>(window);
+  check(vkCreateMetalSurfaceEXT(instance_, &info, nullptr, &surface_),
+        "Metal Vulkan surface");
+#endif
   VkBool32 supported = VK_FALSE;
   check(vkGetPhysicalDeviceSurfaceSupportKHR(physical_, queue_family_, surface_,
                                              &supported),
         "surface support");
   if (!supported)
     throw std::runtime_error(
-        "Selected GPU queue cannot present to this Win32 surface");
+        "Selected GPU queue cannot present to this window surface");
   rebuild_swapchain();
 }
 
@@ -895,7 +963,7 @@ void Context::rebuild_swapchain() {
       !(capabilities.supportedCompositeAlpha &
         VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR))
     throw std::runtime_error(
-        "Win32 surface does not support opaque transfer presentation");
+        "Window surface does not support opaque transfer presentation");
   std::uint32_t count = 0;
   check(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &count,
                                              nullptr),
@@ -1007,7 +1075,7 @@ void Context::rebuild_swapchain() {
             "per-image present semaphore");
   }
   std::fprintf(stderr,
-               "[vulkan] Win32 swapchain %ux%u, format=%d, requested usage=0x%x "
+               "[vulkan] swapchain %ux%u, format=%d, requested usage=0x%x "
                "(surface supports 0x%x); GPU blit, no temporal field blend\n",
                extent_.width, extent_.height, static_cast<int>(format),
                static_cast<unsigned>(requested_usage),
@@ -1015,12 +1083,11 @@ void Context::rebuild_swapchain() {
 }
 
 void Context::destroy_image() {
-  if (display_image_)
-    vkDestroyImage(device_, display_image_, nullptr);
-  if (display_memory_)
-    vkFreeMemory(device_, display_memory_, nullptr);
-  display_image_ = VK_NULL_HANDLE;
-  display_memory_ = VK_NULL_HANDLE;
+  destroy_transfer_image(display_image_, display_memory_);
+  destroy_transfer_image(woven_image_, woven_memory_);
+  destroy_transfer_image(field_average_image_, field_average_memory_);
+  destroy_transfer_image(blended_image_, blended_memory_);
+  field_width_ = field_height_ = 0;
 }
 
 void Context::image_barrier(VkCommandBuffer command, VkImage image,
@@ -1042,12 +1109,8 @@ void Context::image_barrier(VkCommandBuffer command, VkImage image,
                        1, &barrier);
 }
 
-void Context::ensure_display_image(std::uint32_t width, std::uint32_t height) {
-  if (width == image_width_ && height == image_height_)
-    return;
-  // The display image is shared by every submission; drain them before replacing it.
-  wait_idle();
-  destroy_image();
+void Context::create_transfer_image(std::uint32_t width, std::uint32_t height, VkImage &image,
+                                    VkDeviceMemory &memory, const char *name) {
   VkImageCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
@@ -1058,22 +1121,138 @@ void Context::ensure_display_image(std::uint32_t width, std::uint32_t height) {
   info.samples = VK_SAMPLE_COUNT_1_BIT;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
   info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  check(vkCreateImage(device_, &info, nullptr, &display_image_),
-        "display image");
+  check(vkCreateImage(device_, &info, nullptr, &image), name);
   VkMemoryRequirements requirements{};
-  vkGetImageMemoryRequirements(device_, display_image_, &requirements);
+  vkGetImageMemoryRequirements(device_, image, &requirements);
   VkMemoryAllocateInfo allocation{};
   allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocation.allocationSize = requirements.size;
   allocation.memoryTypeIndex =
       memory_type(memory_properties_, requirements.memoryTypeBits,
                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  check(vkAllocateMemory(device_, &allocation, nullptr, &display_memory_),
-        "display image memory");
-  check(vkBindImageMemory(device_, display_image_, display_memory_, 0),
-        "bind display image");
+  check(vkAllocateMemory(device_, &allocation, nullptr, &memory), name);
+  check(vkBindImageMemory(device_, image, memory, 0), name);
+}
+
+void Context::destroy_transfer_image(VkImage &image, VkDeviceMemory &memory) {
+  if (image)
+    vkDestroyImage(device_, image, nullptr);
+  if (memory)
+    vkFreeMemory(device_, memory, nullptr);
+  image = VK_NULL_HANDLE;
+  memory = VK_NULL_HANDLE;
+}
+
+void Context::ensure_display_image(std::uint32_t width, std::uint32_t height) {
+  if (width == image_width_ && height == image_height_)
+    return;
+  // The display image is shared by every submission; drain them before replacing it.
+  wait_idle();
+  destroy_image();
+  create_transfer_image(width, height, display_image_, display_memory_, "display image");
   image_width_ = width;
   image_height_ = height;
+}
+
+void Context::ensure_field_images(std::uint32_t width, std::uint32_t height) {
+  if (width == field_width_ && height == field_height_)
+    return;
+  wait_idle();
+  destroy_transfer_image(woven_image_, woven_memory_);
+  destroy_transfer_image(field_average_image_, field_average_memory_);
+  destroy_transfer_image(blended_image_, blended_memory_);
+  create_transfer_image(width, height, woven_image_, woven_memory_, "woven field image");
+  create_transfer_image(width, height / 2, field_average_image_, field_average_memory_, "field average image");
+  create_transfer_image(width, height, blended_image_, blended_memory_, "blended field image");
+  field_width_ = width;
+  field_height_ = height;
+  woven_valid_ = false;
+}
+
+// The newest field replaces the rows of its parity in the woven image, whose other rows keep the previous field (the
+// first field fills both). A 2:1 linear blit averages each pair of woven rows and a 1:2 linear blit returns to the
+// display height: the donor's copy_frame blend of two line-doubled fields, in transfer operations. Returns the
+// blended image, ready as a transfer source.
+VkImage Context::record_field_blend(VkCommandBuffer command, std::uint32_t width, std::uint32_t height) {
+  image_barrier(command, woven_image_,
+                woven_valid_ ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+  std::vector<VkImageCopy> rows;
+  const auto row_copy = [width](std::uint32_t first_row, std::uint32_t row_count) {
+    VkImageCopy copy{};
+    copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.srcOffset = {0, static_cast<std::int32_t>(first_row), 0};
+    copy.dstOffset = copy.srcOffset;
+    copy.extent = {width, row_count, 1};
+    return copy;
+  };
+  if (!woven_valid_) {
+    rows.push_back(row_copy(0, height));
+  } else {
+    rows.reserve(height / 2);
+    for (std::uint32_t row = woven_parity_; row < height; row += 2)
+      rows.push_back(row_copy(row, 1));
+  }
+  vkCmdCopyImage(command, display_image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, woven_image_,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<std::uint32_t>(rows.size()), rows.data());
+  image_barrier(command, woven_image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT);
+  const auto blit = [&](VkImage source, std::uint32_t source_height, VkImage destination,
+                        std::uint32_t destination_height) {
+    image_barrier(command, destination, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageBlit region{};
+    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.srcOffsets[1] = {static_cast<int>(width), static_cast<int>(source_height), 1};
+    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.dstOffsets[1] = {static_cast<int>(width), static_cast<int>(destination_height), 1};
+    vkCmdBlitImage(command, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region, VK_FILTER_LINEAR);
+    image_barrier(command, destination, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                  VK_ACCESS_TRANSFER_READ_BIT);
+  };
+  blit(woven_image_, height, field_average_image_, height / 2);
+  blit(field_average_image_, height / 2, blended_image_, height);
+  woven_valid_ = true;
+  woven_parity_ ^= 1u;
+  return blended_image_;
+}
+
+// GT4_PRESENT_DUMP: copies the picture of this presentation (before its scaling to the window) to the dump buffer;
+// submit() writes it once the GPU has finished.
+void Context::record_present_dump(VkCommandBuffer command, VkImage source, std::uint32_t width,
+                                  std::uint32_t height) {
+  const std::uint64_t bytes = std::uint64_t(width) * height * 4;
+  if (!dump_buffer_ || dump_buffer_->size < bytes)
+    dump_buffer_ = create_buffer(bytes);
+  VkBufferImageCopy copy{};
+  copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.imageExtent = {width, height, 1};
+  vkCmdCopyImageToBuffer(command, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dump_buffer_->handle, 1, &copy);
+  memory_barrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                 VK_ACCESS_HOST_READ_BIT);
+  dump_width_ = width;
+  dump_height_ = height;
+  dump_pending_ = true;
+}
+
+void Context::write_present_dump() {
+  char name[64];
+  std::snprintf(name, sizeof name, "present_%06llu.ppm", static_cast<unsigned long long>(presentations_));
+  std::ofstream file(dump_directory_ / name, std::ios::binary);
+  file << "P6\n" << dump_width_ << ' ' << dump_height_ << "\n255\n";
+  const auto *pixels = static_cast<const std::uint8_t *>(dump_buffer_->mapped);
+  std::vector<char> row(std::size_t(dump_width_) * 3);
+  for (std::uint32_t y = 0; y < dump_height_; ++y) {
+    for (std::uint32_t x = 0; x < dump_width_; ++x)
+      std::memcpy(&row[std::size_t(x) * 3], pixels + (std::size_t(y) * dump_width_ + x) * 4, 3);
+    file.write(row.data(), static_cast<std::streamsize>(row.size()));
+  }
+  dump_pending_ = false;
 }
 
 void Context::record_presentation(VkCommandBuffer command,
@@ -1103,6 +1282,13 @@ void Context::record_presentation(VkCommandBuffer command,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+  VkImage source = display_image_;
+  if (blend_presentation_)
+    source = record_field_blend(command, width, height);
+  else
+    woven_valid_ = false;
+  if (!dump_directory_.empty() && presentations_ >= dump_first_ && presentations_ <= dump_last_)
+    record_present_dump(command, source, width, height);
   // The acquire semaphore is waited at TRANSFER; the transition must be ordered after it.
   image_barrier(command, target, VK_IMAGE_LAYOUT_UNDEFINED,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1136,7 +1322,7 @@ void Context::record_presentation(VkCommandBuffer command,
   blit.dstOffsets[1] = {static_cast<int>(destination.left + destination.width),
                         static_cast<int>(destination.top + destination.height),
                         1};
-  vkCmdBlitImage(command, display_image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+  vkCmdBlitImage(command, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                  target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                  race_view_fill ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
   // The rendered semaphore signals at ALL_COMMANDS, so presentation follows this transition.
@@ -1161,6 +1347,9 @@ bool Context::acquire_image(Slot &slot, const Submission &submission,
           submission.present_source->size)
     throw std::runtime_error("Invalid native Vulkan frame size");
   ensure_display_image(width, height);
+  blend_presentation_ = g_blend_fields.load() && height >= 2 && height % 2 == 0;
+  if (blend_presentation_)
+    ensure_field_images(width, height);
   std::uint32_t count = 0;
   check(vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr),
         "swapchain images");
@@ -1292,6 +1481,10 @@ std::uint64_t Context::submit(const Submission &submission, bool *presented) {
       present_info.pNext = &completion;
     }
     slot.presented_id = id;
+    if (dump_pending_) {
+      wait_timeline(id);
+      write_present_dump();
+    }
     const auto result = vkQueuePresentKHR(queue_, &present_info);
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR &&
         result != VK_ERROR_OUT_OF_DATE_KHR &&

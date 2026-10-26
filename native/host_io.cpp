@@ -14,6 +14,7 @@
 using gt4::controls::ControlMap;
 using gt4::controls::SourceKind;
 
+#if defined(_WIN32)
 static_assert(gt4::controls::xinput::dpad_up == XINPUT_GAMEPAD_DPAD_UP);
 static_assert(gt4::controls::xinput::dpad_right == XINPUT_GAMEPAD_DPAD_RIGHT);
 static_assert(gt4::controls::xinput::dpad_down == XINPUT_GAMEPAD_DPAD_DOWN);
@@ -28,8 +29,10 @@ static_assert(gt4::controls::xinput::a == XINPUT_GAMEPAD_A);
 static_assert(gt4::controls::xinput::b == XINPUT_GAMEPAD_B);
 static_assert(gt4::controls::xinput::x == XINPUT_GAMEPAD_X);
 static_assert(gt4::controls::xinput::y == XINPUT_GAMEPAD_Y);
+#endif
 
 namespace {
+#if defined(_WIN32)
 void check_audio(MMRESULT result, const char *operation) {
   if (result == MMSYSERR_NOERROR)
     return;
@@ -38,6 +41,7 @@ void check_audio(MMRESULT result, const char *operation) {
   throw std::runtime_error(std::string(operation) + ": " + description + " (" +
                            std::to_string(result) + ")");
 }
+#endif
 
 void press(PadState &pad, std::uint8_t bit, std::uint8_t pressure) {
   pad.buttons |= static_cast<std::uint16_t>(1u << bit);
@@ -45,6 +49,7 @@ void press(PadState &pad, std::uint8_t bit, std::uint8_t pressure) {
 }
 } // namespace
 
+#if defined(_WIN32)
 // Stick and trigger readings are computed by controls.cpp (read_axis, read_trigger), through pad_mapping.cpp.
 PadState map_gamepad(const XINPUT_GAMEPAD &gamepad, const ControlMap &map) {
   gt4::pad::GamepadReading reading;
@@ -61,6 +66,7 @@ PadState map_gamepad(const XINPUT_GAMEPAD &gamepad, const ControlMap &map) {
 PadState map_gamepad(const XINPUT_GAMEPAD &gamepad) {
   return map_gamepad(gamepad, gt4::controls::default_controls());
 }
+#endif
 
 void merge_keyboard(PadState &pad, std::uint16_t buttons) {
   pad.buttons |= buttons;
@@ -69,13 +75,19 @@ void merge_keyboard(PadState &pad, std::uint16_t buttons) {
       pad.pressures[bit] = 255;
 }
 
+#if defined(_WIN32)
 XINPUT_VIBRATION map_rumble(std::uint16_t rumble) {
   const auto motors = gt4::pad::rumble_motors(rumble);
   return {static_cast<WORD>(motors.low_frequency), static_cast<WORD>(motors.high_frequency)};
 }
+#endif
 
 ControllerInput::ControllerInput(ControlMap map, gt4::pad::Backend backend)
     : map_(std::move(map)), backend_(backend) {
+#if !defined(_WIN32)
+  if (backend_ == gt4::pad::Backend::xinput)
+    throw std::runtime_error("GT4_INPUT=xinput exists only on Windows; use sdl");
+#endif
   if (backend_ == gt4::pad::Backend::sdl) {
     // Gamepads only: SDL creates no window and takes no part in the game's message loop.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -100,7 +112,11 @@ void ControllerInput::close_sdl_pad() {
 }
 
 PadState ControllerInput::poll(bool focused, std::uint16_t keyboard_buttons) {
+#if defined(_WIN32)
   PadState pad = backend_ == gt4::pad::Backend::sdl ? poll_sdl(focused) : poll_xinput(focused);
+#else
+  PadState pad = poll_sdl(focused);
+#endif
   // Without focus the pad is neutral: the keyboard counts only in the game window.
   if (!focused)
     return pad;
@@ -108,6 +124,7 @@ PadState ControllerInput::poll(bool focused, std::uint16_t keyboard_buttons) {
   return pad;
 }
 
+#if defined(_WIN32)
 PadState ControllerInput::poll_xinput(bool focused) {
   PadState pad;
   if (!focused) {
@@ -145,6 +162,7 @@ PadState ControllerInput::poll_xinput(bool focused) {
   }
   return pad;
 }
+#endif
 
 // SDL_GetGamepadAxis has already normalized every mapped gamepad trigger to 0..32767,
 // including DualSense. Device names and raw joystick/HID ranges must not rescale it again.
@@ -192,8 +210,8 @@ PadState ControllerInput::poll_sdl(bool focused) {
     motors_ = 0;
     sdl_next_scan_ = 0;
   }
-  if (!sdl_pad_ && GetTickCount64() >= sdl_next_scan_) {
-    sdl_next_scan_ = GetTickCount64() + 2000;
+  if (!sdl_pad_ && SDL_GetTicks() >= sdl_next_scan_) {
+    sdl_next_scan_ = SDL_GetTicks() + 2000;
     int count = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&count);
     std::uint32_t player_one = 0;
@@ -215,12 +233,17 @@ PadState ControllerInput::poll_sdl(bool focused) {
 }
 
 void ControllerInput::rumble(std::uint16_t value) {
+#if defined(_WIN32)
   if (backend_ == gt4::pad::Backend::sdl)
     rumble_sdl(value);
   else
     rumble_xinput(value);
+#else
+  rumble_sdl(value);
+#endif
 }
 
+#if defined(_WIN32)
 void ControllerInput::rumble_xinput(std::uint16_t value) {
   if (slot_ == XUSER_MAX_COUNT || motors_ == value)
     return;
@@ -237,11 +260,12 @@ void ControllerInput::rumble_xinput(std::uint16_t value) {
                              std::to_string(result));
   motors_ = value;
 }
+#endif
 
 void ControllerInput::rumble_sdl(std::uint16_t value) {
   if (!sdl_pad_)
     return;
-  const ULONGLONG now = GetTickCount64();
+  const std::uint64_t now = SDL_GetTicks();
   // SDL rumble lasts for its duration: resend before it runs out while the value holds.
   if (motors_ == value && now - rumble_sent_at_ < 250)
     return;
@@ -259,6 +283,7 @@ void ControllerInput::stop() {
     motors_ = 0;
     return;
   }
+#if defined(_WIN32)
   if (slot_ != XUSER_MAX_COUNT && motors_) {
     XINPUT_VIBRATION vibration{};
     const DWORD result = XInputSetState(slot_, &vibration);
@@ -267,9 +292,12 @@ void ControllerInput::stop() {
       return;
     }
   }
+#endif
   motors_ = 0;
 }
 
+// The WinMM audio output; macOS uses audio_sdl.cpp.
+#if defined(_WIN32)
 namespace {
 // Blocking audio path: four 512-frame buffers, as before the paced mode.
 constexpr std::size_t blocking_frames_per_buffer = 512;
@@ -527,3 +555,4 @@ void AudioOutput::close(bool drain) {
     event_ = nullptr;
   }
 }
+#endif

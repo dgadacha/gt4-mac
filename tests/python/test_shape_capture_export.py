@@ -10,6 +10,8 @@ class ShapeCaptureExportTests(unittest.TestCase):
     def test_native_capture_roundtrip_and_file_controls(self):
         root = Path(__file__).resolve().parents[2]
         build = Path(os.environ.get('GT4_NATIVE_BUILD', root / 'private/slice114-native-base/build'))
+        if os.name != 'nt':
+            self.skipTest('the shape capture fixtures are built on Windows only (native/CMakeLists.txt)')
         executable = build / 'shape_capture_export_fixture.exe'
         if not executable.exists() and 'GT4_NATIVE_BUILD' not in os.environ:
             self.skipTest('Build the native capture export fixture or set GT4_NATIVE_BUILD')

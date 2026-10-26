@@ -145,21 +145,23 @@ std::uint32_t g_decoded_used = 0;'''
     header = header.replace('enum Kind { X11, Wayland, Canvas }', 'enum Kind { X11, Wayland, Canvas, Win32 }')
     header = header.replace('bool has_surface();', 'bool has_surface();\nvoid set_widescreen(bool enabled);')
     output.mkdir(parents=True, exist_ok=True)
-    (output / 'gpu.cpp').write_text(source, encoding='utf-8')
-    (output / 'gpu.hpp').write_text(header, encoding='utf-8')
+    # The pinned port files were written in Windows text mode: CRLF line endings, written explicitly so that every
+    # platform derives the same bytes.
+    (output / 'gpu.cpp').write_text(source, encoding='utf-8', newline='\r\n')
+    (output / 'gpu.hpp').write_text(header, encoding='utf-8', newline='\r\n')
     graphics = donor.parent / 'gs.cpp'
     graphics_source = graphics.read_text(encoding='utf-8')
     graphics_source = graphics_source.replace('"../hw.hpp"', '"hw.hpp"')
     graphics_source = graphics_source.replace('"gpu/gpu.hpp"', '"gpu.hpp"')
     if gs_stream:
         graphics_source = apply_gs_stream_hooks(graphics_source)
-    (output / 'gs.cpp').write_text(graphics_source, encoding='utf-8')
+    (output / 'gs.cpp').write_text(graphics_source, encoding='utf-8', newline='\r\n')
     host = donor.parents[3] / 'host/main.cpp'
     host_source = host.read_text(encoding='utf-8')
     # Preserve the donor's CLI while refusing a silent CPU raster fallback.
     host_source = host_source.replace('    register_generated_code();',
         '    _putenv_s("PS2_GS", "gpu");\n    register_generated_code();')
-    (output / 'main.cpp').write_text(host_source, encoding='utf-8')
+    (output / 'main.cpp').write_text(host_source, encoding='utf-8', newline='\r\n')
 
 
 if __name__ == '__main__':

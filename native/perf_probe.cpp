@@ -15,8 +15,12 @@ __attribute__((weak)) void vu0_aot_report(std::FILE *) {}  // strong definition:
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#if defined(_WIN32)
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <ctime>
+#endif
 
 namespace gt4::perf {
 namespace {
@@ -30,6 +34,7 @@ std::uint64_t wall_us() {
       std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 std::uint64_t cpu_us() {
+#if defined(_WIN32)
   FILETIME created{}, exited{}, kernel{}, user{};
   if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user))
     return UINT64_MAX;
@@ -38,6 +43,13 @@ std::uint64_t cpu_us() {
   };
   // Divide before adding: FILETIME units are 100ns, not guest cycles.
   return ticks(kernel) / 10 + ticks(user) / 10;
+#else
+  // User plus system time of the calling thread.
+  timespec now{};
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) != 0)
+    return UINT64_MAX;
+  return static_cast<std::uint64_t>(now.tv_sec) * 1000000u + static_cast<std::uint64_t>(now.tv_nsec) / 1000u;
+#endif
 }
 constexpr const char *names[] = {
     "ee_dispatch", "vu_interpret", "iop_run", "vif_gif", "gs_host_copy",
@@ -62,12 +74,29 @@ static_assert(std::size(names) == static_cast<std::size_t>(Category::count));
 
 FrameCounters g_frame_counters;
 
+// GetEnvironmentVariableA semantics on every platform: the value's length when it fits in `size` (copied with its
+// NUL), the size it needs (NUL included) when it does not, and 0 when the variable is unset or empty.
+std::uint32_t read_environment(const char *name, char *value, std::uint32_t size) {
+#if defined(_WIN32)
+  return GetEnvironmentVariableA(name, value, size);
+#else
+  const char *text = std::getenv(name);
+  if (!text)
+    return 0;
+  const std::size_t length = std::strlen(text);
+  if (length + 1 > size)
+    return static_cast<std::uint32_t>(length + 1);
+  std::memcpy(value, text, length + 1);
+  return static_cast<std::uint32_t>(length);
+#endif
+}
+
 // The probe prints the [frame] section when it reports, so the counters are visible in owner F8 and in the headless
 // F8-equivalent runs (GT4_MTVU_REPORT_EVERY). GT4_PERF_COUNTERS=0 disables the increments (A/B without them).
 bool counters_enabled() {
   static const bool enabled = [] {
     char value[8]{};
-    const DWORD length = GetEnvironmentVariableA("GT4_PERF_COUNTERS", value, sizeof value);
+    const std::uint32_t length = read_environment("GT4_PERF_COUNTERS", value, sizeof value);
     return !(length == 1 && value[0] == '0');
   }();
   return enabled;
@@ -120,11 +149,11 @@ Probe &Probe::shared() {
 #endif
   static Probe probe({wall_us, cpu_us}, [] {
     char value[8]{};
-    if (GetEnvironmentVariableA("GT4_PERF", value, sizeof value) == 1 && value[0] == '1')
+    if (read_environment("GT4_PERF", value, sizeof value) == 1 && value[0] == '1')
       return true;
     // TASK-011 step 3: GT4_MTVU_REPORT_EVERY (headless [mtvu] report) turns the accounting on; "0" or unset does not.
     char every[32]{};
-    const DWORD length = GetEnvironmentVariableA("GT4_MTVU_REPORT_EVERY", every, sizeof every);
+    const std::uint32_t length = read_environment("GT4_MTVU_REPORT_EVERY", every, sizeof every);
     return length > 0 && !(length == 1 && every[0] == '0');
   }(), stderr, detailed, split_vu);
   return probe;

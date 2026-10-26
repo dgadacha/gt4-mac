@@ -1,6 +1,5 @@
 """Manual capture wrapper uses existing save/lock flow; no game is launched."""
 import json
-import msvcrt
 from pathlib import Path
 import sys
 import tempfile
@@ -54,7 +53,7 @@ class ManualCaptureLauncherTests(unittest.TestCase):
                 self.assertEqual(options['runtime_workspace'], root)
                 with (directory / 'session.lock').open('r+b') as second:
                     with self.assertRaises(OSError):
-                        msvcrt.locking(second.fileno(), msvcrt.LK_NBLCK, 1)
+                        launcher.lock_session_byte(second)
                 raise ValueError('synthetic runtime preflight failure')
             with patch.object(launcher, 'ROOT', root), patch.object(launcher, 'run_probe', side_effect=reject):
                 with self.assertRaisesRegex(ValueError, 'preflight'):
@@ -62,8 +61,8 @@ class ManualCaptureLauncherTests(unittest.TestCase):
             self.assertEqual(card.read_bytes(), original)
             self.assertFalse(any(directory.glob('session-*')))
             with (directory / 'session.lock').open('r+b') as released:
-                msvcrt.locking(released.fileno(), msvcrt.LK_NBLCK, 1)
-                msvcrt.locking(released.fileno(), msvcrt.LK_UNLCK, 1)
+                launcher.lock_session_byte(released)
+                launcher.unlock_session_byte(released)
 
     def test_active_session_and_unqualified_profile_preserve_card(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -75,12 +74,12 @@ class ManualCaptureLauncherTests(unittest.TestCase):
                     launcher.play(root, manifest, capture_shapes=True)
                 lock_path = directory / 'session.lock'
                 with lock_path.open('r+b') as active:
-                    msvcrt.locking(active.fileno(), msvcrt.LK_NBLCK, 1)
+                    launcher.lock_session_byte(active)
                     try:
                         with self.assertRaisesRegex(ValueError, 'already running'):
                             launcher.play(root, manifest, capture_shapes=True)
                     finally:
-                        msvcrt.locking(active.fileno(), msvcrt.LK_UNLCK, 1)
+                        launcher.unlock_session_byte(active)
                 execute.assert_not_called()
             self.assertEqual(card.read_bytes(), original)
             self.assertFalse(any(directory.glob('session-*')))

@@ -10,6 +10,8 @@ class CaptureControlTests(unittest.TestCase):
     def test_deferred_control_and_real_export(self):
         root = Path(__file__).resolve().parents[2]
         build = Path(os.environ.get('GT4_NATIVE_BUILD', root / 'private/slice114-native-base/build'))
+        if os.name != 'nt':
+            self.skipTest('the shape capture fixtures are built on Windows only (native/CMakeLists.txt)')
         executable = build / 'shape_capture_control_fixture.exe'
         if not executable.exists() and 'GT4_NATIVE_BUILD' not in os.environ:
             self.skipTest('Build the manual capture fixture or set GT4_NATIVE_BUILD')

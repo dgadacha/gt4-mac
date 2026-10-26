@@ -6,12 +6,15 @@ from pathlib import Path
 import subprocess
 import unittest
 
+# The native fixtures carry the .exe suffix on Windows only.
+EXECUTABLE_SUFFIX = '.exe' if os.name == 'nt' else ''
+
 
 class ShapeObserverTests(unittest.TestCase):
     def test_native_observer_contract(self):
         root = Path(__file__).resolve().parents[2]
         build = Path(os.environ.get('GT4_NATIVE_BUILD', root / 'private/slice114-native-base/build'))
-        executable = build / 'shape_observer_fixture.exe'
+        executable = build / ('shape_observer_fixture' + EXECUTABLE_SUFFIX)
         if not executable.exists() and 'GT4_NATIVE_BUILD' not in os.environ:
             self.skipTest('Build the native observer fixture or set GT4_NATIVE_BUILD')
         result = subprocess.run([str(executable)], capture_output=True, text=True,
@@ -23,7 +26,7 @@ class ShapeObserverTests(unittest.TestCase):
             self.skipTest('Experimental runtime overlay fixture is not configured')
         build = Path(os.environ['GT4_NATIVE_BUILD'])
         results = [subprocess.run([str(build / name)], capture_output=True, check=True, timeout=30)
-                   for name in ('shape_runtime_control.exe', 'shape_runtime_fixture.exe')]
+                   for name in ('shape_runtime_control' + EXECUTABLE_SUFFIX, 'shape_runtime_fixture' + EXECUTABLE_SUFFIX)]
         self.assertEqual(results[0].stdout, results[1].stdout)
         self.assertIn(b'PASS: synthetic runtime adapter/lifecycle controls', results[1].stderr)
         self.assertIn(b'[probe] 0x00707070', results[1].stderr)

@@ -30,25 +30,34 @@ bool parse_force_baseline(const char *value) {
   throw std::invalid_argument("GT4_VULKAN_FORCE_BASELINE must be 0 or 1");
 }
 
-InstanceChoice select_instance_extensions(const std::vector<std::string> &available, bool force_baseline) {
+InstanceChoice select_instance_extensions(const std::vector<std::string> &available, bool force_baseline,
+                                          const char *surface_extension, bool portability) {
   InstanceChoice choice;
-  for (const char *required : {"VK_KHR_surface", "VK_KHR_win32_surface"}) {
-    if (!has(available, required))
-      throw std::runtime_error(std::string("Vulkan driver lacks the required instance extension ") + required +
+  std::vector<const char *> required = {"VK_KHR_surface", surface_extension};
+  if (portability)
+    required.push_back("VK_KHR_portability_enumeration");
+  for (const char *name : required) {
+    if (!has(available, name))
+      throw std::runtime_error(std::string("Vulkan driver lacks the required instance extension ") + name +
                                "; update the graphics driver");
-    choice.extensions.emplace_back(required);
+    if (std::strcmp(name, "VK_KHR_portability_enumeration") != 0)
+      choice.extensions.emplace_back(name);
   }
-  if (force_baseline || !has(available, "VK_KHR_get_surface_capabilities2"))
-    return choice;
   // Prefer the KHR family (promoted 2025); the EXT family has the same structures and values.
-  if (has(available, "VK_KHR_surface_maintenance1")) {
-    choice.extensions.emplace_back("VK_KHR_get_surface_capabilities2");
-    choice.extensions.emplace_back("VK_KHR_surface_maintenance1");
-    choice.family = MaintenanceFamily::khr;
-  } else if (has(available, "VK_EXT_surface_maintenance1")) {
-    choice.extensions.emplace_back("VK_KHR_get_surface_capabilities2");
-    choice.extensions.emplace_back("VK_EXT_surface_maintenance1");
-    choice.family = MaintenanceFamily::ext;
+  if (!force_baseline && has(available, "VK_KHR_get_surface_capabilities2")) {
+    if (has(available, "VK_KHR_surface_maintenance1")) {
+      choice.extensions.emplace_back("VK_KHR_get_surface_capabilities2");
+      choice.extensions.emplace_back("VK_KHR_surface_maintenance1");
+      choice.family = MaintenanceFamily::khr;
+    } else if (has(available, "VK_EXT_surface_maintenance1")) {
+      choice.extensions.emplace_back("VK_KHR_get_surface_capabilities2");
+      choice.extensions.emplace_back("VK_EXT_surface_maintenance1");
+      choice.family = MaintenanceFamily::ext;
+    }
+  }
+  if (portability) {
+    choice.extensions.emplace_back("VK_KHR_portability_enumeration");
+    choice.portability_enumeration = true;
   }
   return choice;
 }
@@ -69,11 +78,13 @@ DeviceChoice select_device_extensions(const std::vector<std::string> &available,
   DeviceChoice choice;
   choice.extensions.emplace_back("VK_KHR_swapchain");
   const char *maintenance = swapchain_maintenance_extension(instance_family);
-  if (force_baseline || !maintenance || !has(available, maintenance) || !swapchain_maintenance_feature)
-    return choice;
-  choice.extensions.emplace_back(maintenance);
-  choice.present_fences = true;
-  choice.path = instance_family == MaintenanceFamily::khr ? "khr-maintenance1" : "ext-maintenance1";
+  if (!force_baseline && maintenance && has(available, maintenance) && swapchain_maintenance_feature) {
+    choice.extensions.emplace_back(maintenance);
+    choice.present_fences = true;
+    choice.path = instance_family == MaintenanceFamily::khr ? "khr-maintenance1" : "ext-maintenance1";
+  }
+  if (has(available, "VK_KHR_portability_subset"))
+    choice.extensions.emplace_back("VK_KHR_portability_subset");
   return choice;
 }
 

@@ -147,6 +147,7 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(probe.gs_config_text({'GT4_GS_SCALE': '3', 'GT4_PRESENT_MODE': 'fifo',
                                                'GT4_GS_ASPECT': '16:9'}), LEGACY_DEFAULT)
 
+    @unittest.skipUnless(os.name == 'nt', 'gt4-gs.ini holds Windows paths (the GS process exists only on Windows)')
     def test_cache_and_headless_sections_are_unchanged(self):
         self.assertEqual(probe.gs_config_text({}, None, 'C:/cache'), LEGACY_CACHE)
         self.assertEqual(probe.gs_config_text({}, Path('C:/run/gs-frames'), None),

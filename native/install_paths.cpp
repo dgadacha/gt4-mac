@@ -1,6 +1,10 @@
 #include "install_paths.hpp"
 
+#if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -20,10 +24,23 @@ std::string narrow(const std::filesystem::path &path) { return path.string(); }
 } // namespace
 
 std::filesystem::path executable_directory() {
+#if defined(_WIN32)
   wchar_t path[32768];
   const DWORD length = GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
   if (length == 0 || length >= std::size(path)) return {};
   return std::filesystem::path(path).parent_path();
+#elif defined(__APPLE__)
+  char path[32768];
+  std::uint32_t size = static_cast<std::uint32_t>(std::size(path));
+  if (_NSGetExecutablePath(path, &size) != 0) return {};
+  std::error_code error;
+  const std::filesystem::path resolved = std::filesystem::canonical(path, error);
+  return (error ? std::filesystem::path(path) : resolved).parent_path();
+#else
+  std::error_code error;
+  const std::filesystem::path resolved = std::filesystem::read_symlink("/proc/self/exe", error);
+  return error ? std::filesystem::path() : resolved.parent_path();
+#endif
 }
 
 std::filesystem::path choose_shader_directory(const std::filesystem::path &build_time_directory) {

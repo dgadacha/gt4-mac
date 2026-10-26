@@ -1,5 +1,4 @@
 import json
-import msvcrt
 import os
 from pathlib import Path
 import sys
@@ -68,12 +67,12 @@ class PerformanceLauncherTests(unittest.TestCase):
             with patch.object(launcher, 'ROOT', root), patch.object(launcher, 'run_probe') as execute:
                 with (directory / 'session.lock').open('w+b') as lock:
                     lock.write(b'0'); lock.flush(); lock.seek(0)
-                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    launcher.lock_session_byte(lock)
                     try:
                         with self.assertRaisesRegex(ValueError, 'already running'):
                             launcher.play(root, manifest, performance=True)
                     finally:
-                        lock.seek(0); msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                        lock.seek(0); launcher.unlock_session_byte(lock)
                 execute.assert_not_called()
                 manifest.write_text(json.dumps(dict(evidence, profile='old')))
                 with self.assertRaisesRegex(ValueError, 'qualified'):

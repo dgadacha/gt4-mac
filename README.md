@@ -107,6 +107,9 @@ emulation or full PS2 fidelity. Details: [Architecture](docs/ARCHITECTURE.md).
 
 The launcher checks the processor and Vulkan before setup and before Play, and says what is missing.
 
+**macOS on Apple silicon** builds from source with your own disc image and runs natively, with the built-in renderer
+(CoreGS 1.1) on Metal through MoltenVK: see the [macOS build](docs/BUILD-MACOS.md).
+
 ## Install
 
 1. Download **`GT4Recomp-Setup-1.2.4.exe`** from [Releases](https://github.com/moesuito/gt4-staticrecomp/releases)
@@ -192,6 +195,6 @@ Exact revisions and licenses: [THIRD_PARTY.md](native/THIRD_PARTY.md).
 
 ## Documentation
 
-[TASKS](TASKS.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STATUS](docs/STATUS.md) · [BUILD](docs/BUILD.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) ·
+[TASKS](TASKS.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STATUS](docs/STATUS.md) · [BUILD](docs/BUILD.md) · [macOS](docs/BUILD-MACOS.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) ·
 [Renderers](docs/GSDX-PLAN.md) · [Release 1.0.0 plan](docs/RELEASE-1.0.0-PLAN.md) ·
 [Decisions](docs/decisions/) · [Journal](docs/journal/)

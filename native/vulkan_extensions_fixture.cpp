@@ -43,6 +43,16 @@ List with(List list, std::initializer_list<const char *> more) {
   return list;
 }
 
+// The Windows selection (Win32 surface, no portability), whatever platform builds the fixture.
+InstanceChoice select_win32(const List &available, bool force_baseline) {
+  return select_instance_extensions(available, force_baseline, "VK_KHR_win32_surface", false);
+}
+
+// The macOS selection (MoltenVK: Metal surface, portability enumeration).
+InstanceChoice select_metal(const List &available, bool force_baseline) {
+  return select_instance_extensions(available, force_baseline, "VK_EXT_metal_surface", true);
+}
+
 } // namespace
 
 int main() {
@@ -53,23 +63,23 @@ int main() {
 
   // Instance: required pair only on an old driver.
   {
-    const InstanceChoice old = select_instance_extensions(with(kBase, {"VK_EXT_debug_utils"}), false);
+    const InstanceChoice old = select_win32(with(kBase, {"VK_EXT_debug_utils"}), false);
     expect(old.extensions == kBase && old.family == MaintenanceFamily::none, "old driver: surface + win32 only");
   }
   // Instance: KHR family (this machine, 2025+ drivers).
   const List khr_instance = with(kBase, {"VK_KHR_get_surface_capabilities2", "VK_KHR_surface_maintenance1",
                                          "VK_EXT_surface_maintenance1"});
   {
-    const InstanceChoice khr = select_instance_extensions(khr_instance, false);
+    const InstanceChoice khr = select_win32(khr_instance, false);
     expect(khr.family == MaintenanceFamily::khr, "KHR family preferred");
     expect(khr.extensions == with(kBase, {"VK_KHR_get_surface_capabilities2", "VK_KHR_surface_maintenance1"}),
            "KHR instance list");
-    const InstanceChoice forced = select_instance_extensions(khr_instance, true);
+    const InstanceChoice forced = select_win32(khr_instance, true);
     expect(forced.extensions == kBase && forced.family == MaintenanceFamily::none, "forced baseline drops both");
   }
   // Instance: EXT family (2023-2024 drivers).
   {
-    const InstanceChoice ext = select_instance_extensions(
+    const InstanceChoice ext = select_win32(
         with(kBase, {"VK_KHR_get_surface_capabilities2", "VK_EXT_surface_maintenance1"}), false);
     expect(ext.family == MaintenanceFamily::ext, "EXT family");
     expect(ext.extensions == with(kBase, {"VK_KHR_get_surface_capabilities2", "VK_EXT_surface_maintenance1"}),
@@ -77,12 +87,34 @@ int main() {
   }
   // Instance: surface_maintenance1 without its prerequisite is not used.
   {
-    const InstanceChoice lone = select_instance_extensions(with(kBase, {"VK_KHR_surface_maintenance1"}), false);
+    const InstanceChoice lone = select_win32(with(kBase, {"VK_KHR_surface_maintenance1"}), false);
     expect(lone.family == MaintenanceFamily::none && lone.extensions == kBase, "no capabilities2: baseline");
   }
   // Instance: missing required extensions refuse.
-  expect(throws([] { select_instance_extensions({"VK_KHR_surface"}, false); }), "no win32 surface refuses");
-  expect(throws([] { select_instance_extensions({"VK_KHR_win32_surface"}, true); }), "no surface refuses");
+  expect(throws([] { select_win32({"VK_KHR_surface"}, false); }), "no win32 surface refuses");
+  expect(throws([] { select_win32({"VK_KHR_win32_surface"}, true); }), "no surface refuses");
+
+  // Instance on macOS (MoltenVK 1.4 on an M3 lists both maintenance families): the Metal surface, the KHR family and
+  // the portability enumeration last.
+  {
+    const List moltenvk = {"VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_get_surface_capabilities2",
+                           "VK_KHR_surface_maintenance1", "VK_EXT_surface_maintenance1",
+                           "VK_KHR_portability_enumeration"};
+    const InstanceChoice metal = select_metal(moltenvk, false);
+    expect(metal.portability_enumeration && metal.family == MaintenanceFamily::khr &&
+               metal.extensions == List({"VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_get_surface_capabilities2",
+                                         "VK_KHR_surface_maintenance1", "VK_KHR_portability_enumeration"}),
+           "macOS instance list");
+    const InstanceChoice forced = select_metal(moltenvk, true);
+    expect(forced.portability_enumeration &&
+               forced.extensions == List({"VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_portability_enumeration"}),
+           "macOS forced baseline keeps the portability enumeration");
+    expect(!select_win32(with(kBase, {"VK_KHR_portability_enumeration"}), false).portability_enumeration,
+           "Windows never enumerates portability drivers");
+    expect(throws([] { select_metal({"VK_KHR_surface", "VK_EXT_metal_surface"}, false); }),
+           "macOS without portability enumeration refuses");
+    expect(throws([] { select_metal(kBase, false); }), "macOS without a Metal surface refuses");
+  }
 
   // Device.
   const List swapchain = {"VK_KHR_swapchain"};
@@ -111,6 +143,20 @@ int main() {
   }
   expect(throws([] { select_device_extensions({}, MaintenanceFamily::none, false, false); }),
          "no VK_KHR_swapchain refuses");
+  // Device on MoltenVK: the portability subset is enabled whenever it is listed.
+  {
+    const DeviceChoice moltenvk = select_device_extensions(
+        {"VK_KHR_swapchain", "VK_KHR_swapchain_maintenance1", "VK_KHR_portability_subset"}, MaintenanceFamily::khr,
+        true, false);
+    expect(moltenvk.present_fences &&
+               moltenvk.extensions ==
+                   List({"VK_KHR_swapchain", "VK_KHR_swapchain_maintenance1", "VK_KHR_portability_subset"}),
+           "MoltenVK device list");
+    const DeviceChoice forced = select_device_extensions({"VK_KHR_swapchain", "VK_KHR_portability_subset"},
+                                                         MaintenanceFamily::none, false, true);
+    expect(!forced.present_fences && forced.extensions == List({"VK_KHR_swapchain", "VK_KHR_portability_subset"}),
+           "portability subset on the baseline path");
+  }
 
   if (failures) {
     std::fprintf(stderr, "[vulkan-extensions] %d failure(s)\n", failures);
