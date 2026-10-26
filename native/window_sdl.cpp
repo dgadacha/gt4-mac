@@ -14,6 +14,8 @@
 // (picture_layer_host.hpp) once the process names it after attach_window.
 // Test aid: GT4_WINDOW_CAPTURE_DIR=<folder> writes the window as the player sees it (window_<VBlank>.png) every
 // GT4_WINDOW_CAPTURE_EVERY VBlanks (default 600), with either renderer.
+// GT4_WINDOW_ICON=<png>: the application icon in the Dock while the game runs (the repository ships no game artwork;
+// scripts/macos_play.py passes private/macos-play/gt4-icon.png when it exists).
 
 #include "window.hpp"
 #include "race_display.hpp"
@@ -634,6 +636,14 @@ bool open_window(bool start_in_fullscreen) {
   metal_view = SDL_Metal_CreateView(game_window);
   if (!metal_view)
     throw std::runtime_error(std::string("Cannot create the Metal view of the game window: ") + SDL_GetError());
+  if (const char *icon = std::getenv("GT4_WINDOW_ICON"); icon && *icon) {
+    SDL_Surface *surface = SDL_LoadPNG(icon);
+    if (surface && SDL_SetWindowIcon(game_window, surface))
+      std::fprintf(stderr, "[window] application icon %s (GT4_WINDOW_ICON)\n", icon);
+    else
+      std::fprintf(stderr, "[window] GT4_WINDOW_ICON %s not used: %s\n", icon, SDL_GetError());
+    SDL_DestroySurface(surface);
+  }
   // Start in borderless fullscreen on the window's display: the same path as Alt+Enter and F11.
   if (start_fullscreen)
     set_fullscreen(true);

@@ -72,6 +72,8 @@ sound), `--controls <file>` (a controls file, [CONTROLS.md](CONTROLS.md)), `--is
   data and formats the card. Every session first copies the card to `private/macos-play/backups/` (the ten newest
   are kept).
 - **Log:** `private/macos-play/game.log`. F8 writes the performance report to it.
+- **Dock icon:** a PNG of your own at `private/macos-play/gt4-icon.png` becomes the game's icon in the Dock while it
+  runs (`GT4_WINDOW_ICON`); the repository ships no game artwork.
 - **Fullscreen:** `--fullscreen`, or Cmd+F, F11 (fn+F11 on most Mac keyboards) or Alt+Enter in game.
 - **Quit:** close the window or press Cmd+Q. The game stops cleanly and writes a pending save.
 

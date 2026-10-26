@@ -21,6 +21,9 @@ page changes the same settings while playing.
 
   private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2 --upscale 6 --hdr on
 
+A PNG at private/macos-play/gt4-icon.png (your own, the repository ships no game artwork) becomes the game's icon in the
+Dock while it runs (GT4_WINDOW_ICON).
+
 Keyboard (docs/CONTROLS.md): W or Enter accelerate and confirm, S brake, Space handbrake, A/D or the arrows steer and
 move, Backspace or Esc go back, Shift nitro, R/F shift up/down, Q look back, C or Tab camera, P start or pause. Any
 gamepad that SDL3 knows works (Xbox, DualShock 4, DualSense, Switch Pro). Close the window or press Cmd+Q to quit.
@@ -43,6 +46,7 @@ ISO_NAME = 'Gran Turismo 4 (USA) (v2.00).iso'
 PLAY = ROOT / 'private/macos-play'
 MENU_OVERLAY = ROOT / 'private/macos-graphics-menu/overlay.gt4ovl'
 GS_PROCESS = ROOT / 'private/tooling/gt4gs-build/pcsx2-gt4gs/gt4-gs'
+GAME_ICON = PLAY / 'gt4-icon.png'
 GS_FOLDER = PLAY / 'gs'
 BACKUPS_KEPT = 10
 
@@ -127,6 +131,8 @@ def environment(arguments):
         values['GT4_CONTROLS_FILE'] = str(arguments.controls.resolve())
     if not arguments.no_menu_overlay and arguments.menu_overlay.is_file():
         values['GT4_DISC_OVERLAY'] = str(arguments.menu_overlay.resolve())
+    if GAME_ICON.is_file():
+        values['GT4_WINDOW_ICON'] = str(GAME_ICON)
     if arguments.renderer == 'pcsx2':
         values['GT4_RENDERER'] = 'pcsx2'
         values['GT4_GS_PROCESS'] = str(arguments.gs_process.resolve())
