@@ -39,6 +39,11 @@ outside it is ignored with one warning line; gt4-gs never refuses to start becau
 - `aspect` stays forced 16:9 in the INI: the per-scene fill still comes only from protocol 1.3 `display_aspect`; the
   launcher has no aspect setting any more (always auto from the output size, decision 0071 addendum).
 
+**macOS port (2026-10-26):** three hidden rows, `hdr`, `hdr_peak` and `metalfx` (`[GT4GS] HDR`, `HDRPeak`, `MetalFX`),
+are written by `scripts/macos_play.py` and the game's in-game Graphics menu for the macOS build of gt4-gs
+(docs/BUILD-MACOS.md, "HDR and MetalFX"). The Windows launcher does not offer them and gt4-gs.exe for Windows
+has no code for them.
+
 ## What it is
 
 `docs/launcher/gs-settings.toml` is the single source for the PCSX2 GS options that GT4Recomp exposes. Each row is one

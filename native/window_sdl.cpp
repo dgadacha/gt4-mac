@@ -289,6 +289,35 @@ void register_resolution_setting() {
        0, choices - 1});
 }
 
+// GT4_RENDERER=pcsx2: an Off / On row of the Graphics menu for a [GT4GS] key of the GS process's settings file (HDR,
+// MetalFX), applied like the resolution (the file is rewritten and the GS process reads it again).
+void register_gs_switch(int id, const char *key, const char *name) {
+  const char *path = std::getenv("GT4_GS_CONFIG");
+  std::string text;
+  if (!gs_process_renderer() || !path || !*path || !gt4::gs_config::read_file(path, text))
+    return;
+  auto state = std::make_shared<int>(gt4::gs_config::value(text, "GT4GS", key).value_or("false") == "true" ? 1 : 0);
+  gt4::menu_bridge::register_setting(
+      id, {[state] { return *state; },
+           [state, config = std::string(path), key, name](int value) {
+             std::string contents;
+             if (value == *state)
+               return;
+             if (!gt4::gs_config::read_file(config, contents) ||
+                 !gt4::gs_config::write_file(config, gt4::gs_config::with_value(contents, "GT4GS", key,
+                                                                                value ? "true" : "false"))) {
+               std::fprintf(stderr, "[window] cannot write %s to %s\n", key, config.c_str());
+               return;
+             }
+             *state = value;
+#ifdef GT4_GS_STREAM_CLIENT
+             gt4::gs_stream::reload_gs_settings();
+#endif
+             std::fprintf(stderr, "[window] %s from the menu: %s\n", name, value ? "on" : "off");
+           },
+           0, 1});
+}
+
 // In-game Graphics menu (menu_bridge.hpp): the option scripts read and change these live settings on this thread.
 void register_menu_settings() {
   namespace bridge = gt4::menu_bridge;
@@ -302,6 +331,8 @@ void register_menu_settings() {
   bridge::register_setting(bridge::kDeinterlacing, {[] { return blend_interlaced_fields ? 1 : 0; },
                                                     [](int value) { blend_interlaced_fields = value != 0; }, 0, 1});
   register_resolution_setting();
+  register_gs_switch(bridge::kHDR, "HDR", "HDR");
+  register_gs_switch(bridge::kMetalFX, "MetalFX", "MetalFX upscaling");
 }
 
 // GT4_WINDOW_CAPTURE_DIR / GT4_WINDOW_CAPTURE_EVERY (test aid, see the top of this file).
@@ -318,6 +349,11 @@ void capture_window_at_vblank() {
   std::snprintf(name, sizeof name, "/window_%05llu.png", static_cast<unsigned long long>(vblank_count));
   if (!window || !gt4::picture_host::capture_window(window, (window_capture_dir + name).c_str()))
     std::fprintf(stderr, "[window] capture at VBlank %llu failed\n", static_cast<unsigned long long>(vblank_count));
+  else
+    std::fprintf(stderr, "[window] captured VBlank %llu (window %s, EDR headroom of the main screen %.2f)\n",
+                 static_cast<unsigned long long>(vblank_count),
+                 gt4::picture_host::window_visible(window) ? "visible" : "hidden by other windows",
+                 gt4::picture_host::edr_headroom());
 }
 
 // GT4_RENDERER=pcsx2: the picture follows the window's pixel size and backing scale.

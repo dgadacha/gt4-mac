@@ -50,7 +50,8 @@ def screen_page():
     rows = [lambda d, n=name: widget("Composite", d, [f'name string {{"{n}"}}']) for name in
             ("bg", "Title", "Wide", "Vertical", "Horizontal")]
     rows += [video_output_row, lambda d: widget("Composite", d, ['name string {"Buttons"}'])]
-    pane = lambda d: widget("VBox", d, ['name string {"Pane"}', "packing digit {1}"], rows)
+    pane = lambda d: widget("VBox", d, ['name string {"Pane"}', "packing digit {1}", "geometry rectangle {160 130 320 150}"],
+                           rows)
     page = widget("RootWindow", 2, ['name string {"ScreenRoot"}'], [pane])
     return "\n".join(["Project {", "\tchildren [1] {"] + page + ["\t}", "}"])
 
@@ -90,7 +91,8 @@ class DisplayRowTests(unittest.TestCase):
         edited = menu.edit_mproject(screen_page()).split("\n")
         stripped = [line.strip() for line in edited]
         pane = stripped.index('name string {"Pane"}')
-        self.assertEqual(stripped[pane + 2], "children [9] {")
+        self.assertEqual(stripped[pane + 3], "children [11] {")
+        self.assertEqual(stripped[pane + 2], "geometry rectangle {160 82 320 150}")
         names = [line for line in stripped if line.startswith('name string {"')]
         self.assertLess(names.index('name string {"HiVision"}'), names.index('name string {"Display"}'))
         self.assertLess(names.index('name string {"Display"}'), names.index('name string {"Buttons"}'))
@@ -128,6 +130,18 @@ class DisplayRowTests(unittest.TestCase):
         self.assertIn("children [7] {", [line.strip() for line in row])
         self.assertEqual(sum(line.count("{") - line.count("}") for line in row), 0)
 
+    def test_hdr_and_metalfx_rows_close_the_list(self):
+        edited = menu.edit_mproject(screen_page()).split("\n")
+        stripped = [line.strip() for line in edited]
+        names = [line for line in stripped if line.startswith('name string {"')]
+        order = [names.index(f'name string {{"{name}"}}') for name in ("Resolution", "HDR", "MetalFX", "Buttons")]
+        self.assertEqual(order, sorted(order))
+        start = stripped.index('name string {"MetalFX"}') - 1
+        text = "\n".join(edited[start:menu._block_end(edited, start) + 1])
+        for expected in ('key string {"LabelMetalFX"}', "geometry rectangle {0 244 320 32}", 'name string {"MetalFXOn"}',
+                         'key string {"ItemOn"}'):
+            self.assertIn(expected, text)
+
     def test_unexpected_pages_are_refused(self):
         with self.assertRaises(ValueError):
             menu.edit_mproject(screen_page().replace('children [7]', 'children [6]'))
@@ -142,6 +156,7 @@ class DisplayRowTests(unittest.TestCase):
         self.assertEqual(pages[menu.SCREEN_PAGE]["LabelResolution"], "Resolution")
         self.assertEqual(pages[menu.SCREEN_PAGE]["ResNative"], "Native")
         self.assertNotIn("Res5", pages[menu.SCREEN_PAGE])
+        self.assertEqual(pages[menu.SCREEN_PAGE]["LabelMetalFX"], "MetalFX Upscaling")
         self.assertEqual(pages["Other"], {"k": "v"})
         with self.assertRaises(ValueError):
             menu.edit_rtext(menu.edit_rtext(data))

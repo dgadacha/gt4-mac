@@ -15,9 +15,11 @@ the Display Mode row; --no-menu-overlay starts without it.
 
 PCSX2 GS renderer (docs/BUILD-MACOS.md, section "GS process"): --renderer pcsx2 draws the picture with gt4-gs, the
 macOS build of the PCSX2 GS process, at a higher internal resolution. Its settings are private/macos-play/gs/gt4-gs.ini
-(created on first use, internal resolution 3x); --upscale N (1 to 12) sets the internal resolution multiplier.
+(created on first use, internal resolution 3x); --upscale N (1 to 12) sets the internal resolution multiplier,
+--hdr on|off the HDR output on an EDR display and --metalfx on|off the MetalFX upscaling. The game's Options > Screen
+page changes the same settings while playing.
 
-  private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2 --upscale 6
+  private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2 --upscale 6 --hdr on
 
 Keyboard (docs/CONTROLS.md): W or Enter accelerate and confirm, S brake, Space handbrake, A/D or the arrows steer and
 move, Backspace or Esc go back, Shift nitro, R/F shift up/down, Q look back, C or Tab camera, P start or pause. Any
@@ -74,13 +76,41 @@ def prepare(card):
     return guest
 
 
-def gs_config(upscale):
-    """The GS process settings (docs/GS-SETTINGS.md): written on first use or when --upscale is given, kept otherwise."""
+def with_ini_value(text, section, key, value):
+    """INI text with `key = value` in [section]: the key's line replaced, else added after the section's last line."""
+    lines = text.splitlines()
+    inside, insert_at = False, None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            if inside:
+                break
+            inside = stripped[1:-1].strip() == section
+            insert_at = index + 1 if inside else insert_at
+        elif inside and '=' in stripped and stripped.split('=', 1)[0].strip() == key:
+            lines[index] = f'{key} = {value}'
+            return '\n'.join(lines) + '\n'
+        elif inside and stripped:
+            insert_at = index + 1
+    if insert_at is None:
+        lines += ['', f'[{section}]']
+        insert_at = len(lines)
+    lines.insert(insert_at, f'{key} = {value}')
+    return '\n'.join(lines) + '\n'
+
+
+def gs_config(upscale, hdr=None, metalfx=None):
+    """The GS process settings (docs/GS-SETTINGS.md): created on first use, then only the options given change."""
     GS_FOLDER.mkdir(parents=True, exist_ok=True)
     config = GS_FOLDER / 'gt4-gs.ini'
-    if upscale or not config.exists():
-        config.write_text(f'[EmuCore/GS]\nupscale_multiplier = {upscale or 3}\n\n[GT4GS]\nDataRoot = {GS_FOLDER / "data"}\n',
-                          encoding='utf-8')
+    text = config.read_text(encoding='utf-8') if config.exists() else (
+        f'[EmuCore/GS]\nupscale_multiplier = 3\n\n[GT4GS]\nDataRoot = {GS_FOLDER / "data"}\n')
+    if upscale:
+        text = with_ini_value(text, 'EmuCore/GS', 'upscale_multiplier', str(upscale))
+    for key, value in (('HDR', hdr), ('MetalFX', metalfx)):
+        if value:
+            text = with_ini_value(text, 'GT4GS', key, 'true' if value == 'on' else 'false')
+    config.write_text(text, encoding='utf-8')
     return config
 
 
@@ -100,7 +130,7 @@ def environment(arguments):
     if arguments.renderer == 'pcsx2':
         values['GT4_RENDERER'] = 'pcsx2'
         values['GT4_GS_PROCESS'] = str(arguments.gs_process.resolve())
-        values['GT4_GS_CONFIG'] = str(gs_config(arguments.upscale))
+        values['GT4_GS_CONFIG'] = str(gs_config(arguments.upscale, arguments.hdr, arguments.metalfx))
     return values
 
 
@@ -121,14 +151,16 @@ def main(argv=None):
     parser.add_argument('--gs-process', type=Path, default=GS_PROCESS, help='gt4-gs executable (with --renderer pcsx2)')
     parser.add_argument('--upscale', type=int, choices=range(1, 13), metavar='N',
                         help='internal resolution multiplier of gt4-gs, 1 to 12 (kept in private/macos-play/gs/gt4-gs.ini)')
+    parser.add_argument('--hdr', choices=('on', 'off'), help='HDR output of gt4-gs on an EDR display (kept likewise)')
+    parser.add_argument('--metalfx', choices=('on', 'off'), help='MetalFX upscaling in gt4-gs (kept likewise)')
     arguments = parser.parse_args(argv)
     try:
         if not arguments.iso.is_file():
             raise ValueError(f'missing disc image: {arguments.iso}')
         if arguments.renderer == 'pcsx2' and not arguments.gs_process.is_file():
             raise ValueError(f'missing GS process {arguments.gs_process}; build it (docs/BUILD-MACOS.md, "GS process")')
-        if arguments.upscale and arguments.renderer != 'pcsx2':
-            raise ValueError('--upscale needs --renderer pcsx2')
+        if (arguments.upscale or arguments.hdr or arguments.metalfx) and arguments.renderer != 'pcsx2':
+            raise ValueError('--upscale, --hdr and --metalfx need --renderer pcsx2')
         card = arguments.card.resolve()
         guest = prepare(card)
         command = [str(GAME), guest.name, '--ntsc', '--disc', str(arguments.iso.resolve()), '--memcard', str(card),

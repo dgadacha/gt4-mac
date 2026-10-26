@@ -1,8 +1,8 @@
 """In-game Graphics menu: the edits of GT4's option project, applied to the user's own disc files.
 
-The Screen page of the Options menu (projects/option) gets a "Display Mode" row (Window / Full Screen) and a
-"Resolution" row (Native, then up to five resolutions that the game fills in for the screen, such as 1920x1080: the
-internal resolution of the PCSX2 GS renderer), made of the game's own widgets: copies of the page's Video Output row in option.mproject (the widget tree, text), with their texts added
+The Screen page of the Options menu (projects/option) gets a "Display Mode" row (Window / Full Screen) and, for the
+PCSX2 GS renderer, "Resolution" (Native, then up to five resolutions that the game fills in for the screen, such as
+1920x1080: the internal resolution), "HDR" and "MetalFX Upscaling" rows (Off / On), made of the game's own widgets: copies of the page's Video Output row in option.mproject (the widget tree, text), with their texts added
 to US/rtext.rt2 (RT03, scripts/gt4_rtext.py). A row stays hidden unless the option script finds its setting in the
 host bridge (native/menu_bridge.hpp), so the edited files also work on a runtime without it.
 
@@ -48,6 +48,12 @@ SCREEN_TEXTS = {
     'LabelResolution': 'Resolution',
     'ResNative': 'Native',
     'TOOLTIP|Resolution': 'Draw the game at the PS2 resolution or higher. Higher is sharper and needs a faster GPU.',
+    'LabelHDR': 'HDR',
+    'LabelMetalFX': 'MetalFX Upscaling',
+    'ItemOff': 'Off',
+    'ItemOn': 'On',
+    'TOOLTIP|HDR': 'Brighter lights and reflections on an HDR display, such as a MacBook Pro XDR screen.',
+    'TOOLTIP|MetalFX': 'Enlarge the picture to the screen with Apple MetalFX when the resolution is lower than the screen.',
 }
 # The Resolution items after Native have no stored text: the option script writes the screen's resolutions into them
 # at run time (native/gs_resolution.hpp) and removes the items the screen does not use. (A stored text would win: the
@@ -62,7 +68,11 @@ ROWS = [
     ('Resolution', 'LabelResolution',
      [('ResNative', 'ResNative')] + [(f'Res{slot}', None) for slot in range(1, RESOLUTION_SLOTS + 1)],
      'RGBA {144 144 150 183}'),
+    ('HDR', 'LabelHDR', [('HdrOff', 'ItemOff'), ('HdrOn', 'ItemOn')], 'RGBA {154 154 161 183}'),
+    ('MetalFX', 'LabelMetalFX', [('MetalFXOff', 'ItemOff'), ('MetalFXOn', 'ItemOn')], 'RGBA {144 144 150 183}'),
 ]
+# The page's pane moves up so that its rows stay above the tooltip bar (y 438) when all of them show.
+SCREEN_PANE = ('geometry rectangle {160 130 320 150}', 'geometry rectangle {160 82 320 150}')
 VIDEO_OUTPUT_COLOUR = 'RGBA {144 144 150 183}'
 VIDEO_OUTPUT_TOP = 116
 ROW_HEIGHT = 32
@@ -147,6 +157,8 @@ def edit_mproject(text):
     if lines[pane_children].strip() != 'children [7] {':
         raise ValueError('Screen page: unexpected row count')
     lines[pane_children] = lines[pane_children].replace('children [7]', f'children [{7 + len(ROWS)}]')
+    pane_geometry = _find_line(lines, SCREEN_PANE[0], pane, pane_children)
+    lines[pane_geometry] = lines[pane_geometry].replace(*SCREEN_PANE)
     hivision = _find_line(lines, 'name string {"HiVision"}', pane, page_end) - 1
     hivision_end = _block_end(lines, hivision)
     rows = [line for position in range(len(ROWS)) for line in option_row(lines[hivision:hivision_end + 1], position)]

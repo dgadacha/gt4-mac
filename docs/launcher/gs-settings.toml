@@ -1282,3 +1282,50 @@ default = "0"
 written = "when-set"
 status = "resolved"
 notes = "GT4 fork test key (gt4-gs 0.3.0 and later, TASK-038). Listed for the allow-list; never written by the launcher."
+
+[[setting]]
+id = "hdr"
+label = "HDR"
+help = "macOS: high dynamic range output on a display with EDR headroom (XDR): the picture's highlights are expanded."
+page = "hidden"
+order = 24
+control = "toggle"
+section = "GT4GS"
+key = "HDR"
+type = "bool"
+default = "false"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs (dgadacha/gt4recomp-gs, branch gt4gs/macos): the Metal layer becomes RGBA16Float in extended linear sRGB with EDR, and the SDR picture is decoded to linear light with its highlights above a knee expanded towards HDRPeak. Set by scripts/macos_play.py and the in-game Graphics menu; not offered by the Windows launcher, and gt4-gs.exe for Windows ignores it."
+
+[[setting]]
+id = "hdr_peak"
+label = "HDR peak"
+help = "macOS: brightness of the brightest highlights with HDR on, in percent of SDR white (100 to 1600)."
+page = "hidden"
+order = 25
+control = "slider"
+section = "GT4GS"
+key = "HDRPeak"
+type = "int"
+min = 100
+max = 1600
+default = "300"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs: the peak of the highlight expansion, limited to the display's potential EDR headroom. 100 keeps the SDR picture on the EDR layer."
+
+[[setting]]
+id = "metalfx"
+label = "MetalFX upscaling"
+help = "macOS: enlarge the picture to its size on screen with MetalFX when the internal resolution is lower than that."
+page = "hidden"
+order = 26
+control = "toggle"
+section = "GT4GS"
+key = "MetalFX"
+type = "bool"
+default = "false"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs: MetalFX spatial scaler (macOS 13 or later) from the internal resolution to the picture's display rectangle, before CAS and the presentation; skipped when the picture is not smaller than that rectangle on both axes."

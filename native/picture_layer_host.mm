@@ -67,6 +67,12 @@ void gt4::picture_host::resize(std::uint32_t pixel_width, std::uint32_t pixel_he
 
 bool gt4::picture_host::shown() { return g_host != nil; }
 
+double gt4::picture_host::edr_headroom() { return [[NSScreen mainScreen] maximumExtendedDynamicRangeColorComponentValue]; }
+
+bool gt4::picture_host::window_visible(void *ns_window) {
+  return ([(__bridge NSWindow *)ns_window occlusionState] & NSWindowOcclusionStateVisible) != 0;
+}
+
 void gt4::picture_host::release() {
   if (g_host) {
     [CATransaction begin];

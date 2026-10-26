@@ -116,8 +116,10 @@ triggers and rumble; the first connected pad is player 1.
 Options > Screen gets a **Display Mode** row (Window, Full Screen): the game's own row, list, texts, tooltip and
 sounds, and the window changes at once. With the PCSX2 GS renderer it also gets a **Resolution** row: Native (the
 PS2 picture), then the common resolutions that fit in the screen (1280x720, 1920x1080, 2560x1440, 3840x2160) and the
-screen's own resolution, for example 3024x1964 on a 14-inch MacBook Pro. The choice applies within a few frames and is
-kept in the GS process's settings file. Cancel on the page restores what the page opened with.
+screen's own resolution, for example 3024x1964 on a 14-inch MacBook Pro, then **HDR** and **MetalFX Upscaling**
+(Off, On; see [HDR and MetalFX](#hdr-and-metalfx)). The choices apply within a few frames and are kept in the GS
+process's settings file. Cancel on the page restores what the page opened with. The page's panel sits higher than in
+the original so that its eight rows stay above the tooltip bar.
 
 How it works:
 
@@ -136,7 +138,7 @@ How it works:
    the argument array in a2. The window registers setting 1 (display mode) and setting 2 (field blend, not in the menu
    yet); with the PCSX2 GS renderer, setting 3 (the resolution choice) and the read-only settings 11 to 15 and 21 to
    25 (width and height of each resolution offered, `native/gs_resolution.hpp`), which the script writes into the
-   list's items, removing the items the screen does not use. Without the bridge, or in a headless run (no window, no
+   list's items, removing the items the screen does not use, then settings 4 (HDR) and 5 (MetalFX). Without the bridge, or in a headless run (no window, no
    display settings), `IsDrawPerfMeter` returns nil and the script keeps the row hidden.
 
 The option script is not built by this repository. It is compiled from the reconstructed option scripts of OpenAdhoc
@@ -219,6 +221,27 @@ Known differences: the 480i menus leave a black band at the bottom of the window
 pages checked), which the built-in renderer does not show; the first run compiles shaders (a notice at the bottom
 left of the picture, gone once they are in the cache).
 
+### HDR and MetalFX
+
+Two options of the macOS `gt4-gs`, in `gt4-gs.ini` `[GT4GS]` (`HDR`, `HDRPeak`, `MetalFX`; docs/GS-SETTINGS.md), set
+by `macos_play.py --hdr on|off --metalfx on|off` or the game's Options > Screen page, which applies them at once:
+
+- **HDR** (displays with EDR headroom, such as the XDR screen of a MacBook Pro): the picture is presented on an
+  RGBA16Float layer in extended linear sRGB that asks for high dynamic range (`preferredDynamicRange` and
+  `contentsHeadroom` on macOS 26, the EDR flag before). The PS2 picture is SDR: it is decoded to linear light and its
+  highlights, from luminance 0.7 (sRGB 0.85), are expanded towards `HDRPeak` percent of SDR white (default 300),
+  limited to the screen's potential headroom; shadows and midtones keep their SDR look. The headroom shows only while
+  the picture is visible: `gt4-gs` logs the screen's EDR headroom two seconds after HDR turns on (above 1 when it is
+  in use). A test program with the same setup across two processes (a remote layer shown with `CALayerHost`) raised
+  the headroom of this M3 Pro's screen to 5.33 of a potential 16; window captures stay SDR, so the result is for the
+  eye to judge.
+- **MetalFX:** Apple's spatial upscaler (macOS 13 or later) enlarges the picture from its internal resolution to its
+  rectangle in the window, instead of the presentation's bilinear stretch, when the picture is smaller on both axes
+  (for example 2x, 1280x896, in a 1920x1080 window). It is a cheaper way to a sharp full-screen picture than a high
+  multiplier: in game, 2x with MetalFX in the 1920x1080 window kept 60 FPS with 4.3 to 6.2 ms of GPU time per race
+  frame, against 10.2 to 12.0 ms for 3x without it (GPU times reported by `gt4-gs`, which the Mac's clock scaling
+  affects). At a multiplier that already fills the screen it does nothing.
+
 ## Under the hood
 
 | File | Role |
@@ -230,8 +253,8 @@ left of the picture, gone once they are in the cache).
 | `native/native_vulkan.cpp` (`set_interlaced_presentation`) | the field blend of interlaced pictures in transfer operations: the newest field replaces its rows in a woven image, a 2:1 linear blit averages each pair of rows and a 1:2 linear blit returns to the display height; `GT4_PRESENT_DUMP=<folder>` with `GT4_PRESENT_DUMP_FRAMES=first:last` writes the presented pictures (before the window scaling) as PPM files, for tests |
 | `native/native_vulkan.*`, `native/vulkan_extensions.*` | the Vulkan loader (`dlopen`: next to the executable, Homebrew `vulkan-loader`, then MoltenVK), the Metal surface (`VK_EXT_metal_surface`, the window's CAMetalLayer as the surface handle), `VK_KHR_portability_enumeration` and `VK_KHR_portability_subset` |
 | `native/gs_stream/gs_stream_client.cpp`, `native/gs_stream/gs_stream_ipc_posix.cpp` | the GS stream client of the Windows release (the process start, file hash and clocks have POSIX versions) and its transport on POSIX shared memory and address waits; `GT4_GS_CAPTURE` writes `.gscap` files with either renderer |
-| `native/picture_layer_host.mm` | `GT4_RENDERER=pcsx2`: the GS process's picture layer in the window; `GT4_WINDOW_CAPTURE_DIR=<folder>` (with `GT4_WINDOW_CAPTURE_EVERY`, VBlanks) writes the window as the player sees it, for tests |
-| `native/gs_config_file.*`, `native/gs_resolution.*` | the Resolution row: one key of `gt4-gs.ini` changed in place, and the resolutions offered per screen with their multipliers (fixtures `native_gs_config_file`, `native_gs_resolution`) |
+| `native/picture_layer_host.mm` | `GT4_RENDERER=pcsx2`: the GS process's picture layer in the window; `GT4_WINDOW_CAPTURE_DIR=<folder>` (with `GT4_WINDOW_CAPTURE_EVERY`, VBlanks) writes the window as the player sees it, for tests, and logs whether the window is visible and the screen's EDR headroom; each capture holds the game for about 50 ms |
+| `native/gs_config_file.*`, `native/gs_resolution.*` | the Resolution, HDR and MetalFX rows: one key of `gt4-gs.ini` changed in place, and the resolutions offered per screen with their multipliers (fixtures `native_gs_config_file`, `native_gs_resolution`) |
 | `native/posix_compat.h` | `_putenv_s`, `tmpfile_s` and `fopen_s` for the shared sources, so the derived port files keep their pinned bytes |
 | `scripts/vu1_image.py build --pinned-tail` | the VU1 image without the recorded snapshots: the tail comes from the pin, and the image must equal the pinned image |
 | `scripts/prepare_external_vulkan.py`, `scripts/prepare_perf_runtime.py` | write their pinned text files with CRLF on every platform (they used the platform's text mode) |

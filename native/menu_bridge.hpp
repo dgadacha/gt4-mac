@@ -52,6 +52,8 @@ enum SettingId : int {
   kInternalResolution = 3,
   kResolutionWidthBase = 10,  // + n: width of the n-th resolution, 0 when fewer are offered (n = 1..5)
   kResolutionHeightBase = 20, // + n: its height
+  kHDR = 4,                   // PCSX2 GS renderer: 0 SDR, 1 HDR output on EDR displays
+  kMetalFX = 5,               // PCSX2 GS renderer: 0 off, 1 MetalFX upscaling to the screen
 };
 
 struct Setting {

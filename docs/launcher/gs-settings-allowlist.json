@@ -550,6 +550,31 @@
     },
     {
       "section": "GT4GS",
+      "key": "HDR",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "HDRPeak",
+      "type": "int",
+      "min": 100,
+      "max": 1600
+    },
+    {
+      "section": "GT4GS",
+      "key": "MetalFX",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
       "key": "PerfOverlay",
       "type": "bool",
       "values": [

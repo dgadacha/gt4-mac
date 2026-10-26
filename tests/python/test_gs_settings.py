@@ -61,9 +61,10 @@ def by_id():
 class TableSchemaTests(unittest.TestCase):
     def test_table_loads_and_has_one_row_per_setting(self):
         table = rows()
-        # 71 rows, plus textures_folder (TASK-088, launcher row).
-        self.assertEqual(len(table), 72)
-        self.assertEqual(len({row['id'] for row in table}), 72)
+        # 71 rows, plus textures_folder (TASK-088, launcher row) and the three hidden macOS presentation rows (hdr,
+        # hdr_peak, metalfx).
+        self.assertEqual(len(table), 75)
+        self.assertEqual(len({row['id'] for row in table}), 75)
 
     def test_every_row_has_the_documented_columns(self):
         for row in rows():

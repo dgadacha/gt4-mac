@@ -19,6 +19,10 @@ bool show(std::uint32_t context_id);
 // The window's picture size in pixels and its backing scale (pixels per point).
 void resize(std::uint32_t pixel_width, std::uint32_t pixel_height, double scale);
 bool shown();
+// The main screen's current EDR headroom (1.0 without extended dynamic range on screen), for logs.
+double edr_headroom();
+// Whether part of the window (an NSWindow) is visible on screen (not hidden by other windows), for logs.
+bool window_visible(void *ns_window);
 // Removes the picture before the Metal layer goes away.
 void release();
 
