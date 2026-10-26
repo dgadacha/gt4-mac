@@ -38,6 +38,7 @@
 #endif
 #include "picture_layer_host.hpp"
 #include "gs_config_file.hpp"
+#include "gs_menu_settings.hpp"
 #include "gs_resolution.hpp"
 #ifdef GT4_MTVU_MEASURE
 #include "mtvu_measure.hpp"
@@ -291,33 +292,34 @@ void register_resolution_setting() {
        0, choices - 1});
 }
 
-// GT4_RENDERER=pcsx2: an Off / On row of the Graphics menu for a [GT4GS] key of the GS process's settings file (HDR,
-// MetalFX), applied like the resolution (the file is rewritten and the GS process reads it again).
-void register_gs_switch(int id, const char *key, const char *name) {
+// GT4_RENDERER=pcsx2: a row of the Graphics page that writes keys of the GS process's settings file
+// (gs_menu_settings.hpp: MetalFX, anisotropic filtering, FXAA, CAS, shade boost, HDR), applied like the resolution (the file is
+// rewritten and the GS process reads it again).
+void register_gs_row(int id, const gt4::gs_menu_settings::Row &row) {
   const char *path = std::getenv("GT4_GS_CONFIG");
   std::string text;
   if (!gs_process_renderer() || !path || !*path || !gt4::gs_config::read_file(path, text))
     return;
-  auto state = std::make_shared<int>(gt4::gs_config::value(text, "GT4GS", key).value_or("false") == "true" ? 1 : 0);
+  auto state = std::make_shared<int>(gt4::gs_menu_settings::current_choice(row, text));
   gt4::menu_bridge::register_setting(
       id, {[state] { return *state; },
-           [state, config = std::string(path), key, name](int value) {
+           [state, config = std::string(path), &row](int choice) {
              std::string contents;
-             if (value == *state)
+             if (choice == *state)
                return;
              if (!gt4::gs_config::read_file(config, contents) ||
-                 !gt4::gs_config::write_file(config, gt4::gs_config::with_value(contents, "GT4GS", key,
-                                                                                value ? "true" : "false"))) {
-               std::fprintf(stderr, "[window] cannot write %s to %s\n", key, config.c_str());
+                 !gt4::gs_config::write_file(config, gt4::gs_menu_settings::with_choice(row, contents, choice))) {
+               std::fprintf(stderr, "[window] cannot write the %s to %s\n", row.name, config.c_str());
                return;
              }
-             *state = value;
+             *state = choice;
 #ifdef GT4_GS_STREAM_CLIENT
              gt4::gs_stream::reload_gs_settings();
 #endif
-             std::fprintf(stderr, "[window] %s from the menu: %s\n", name, value ? "on" : "off");
+             std::fprintf(stderr, "[window] %s from the menu: %s\n", row.name,
+                          row.choice_names[static_cast<std::size_t>(choice)]);
            },
-           0, 1});
+           0, static_cast<int>(row.choices.size()) - 1});
 }
 
 // In-game Graphics menu (menu_bridge.hpp): the option scripts read and change these live settings on this thread.
@@ -333,8 +335,13 @@ void register_menu_settings() {
   bridge::register_setting(bridge::kDeinterlacing, {[] { return blend_interlaced_fields ? 1 : 0; },
                                                     [](int value) { blend_interlaced_fields = value != 0; }, 0, 1});
   register_resolution_setting();
-  register_gs_switch(bridge::kHDR, "HDR", "HDR");
-  register_gs_switch(bridge::kMetalFX, "MetalFX", "MetalFX upscaling");
+  namespace rows = gt4::gs_menu_settings;
+  register_gs_row(bridge::kMetalFX, rows::kMetalFX);
+  register_gs_row(bridge::kAnisotropicFiltering, rows::kAnisotropicFiltering);
+  register_gs_row(bridge::kAntiAliasing, rows::kAntiAliasing);
+  register_gs_row(bridge::kSharpening, rows::kSharpening);
+  register_gs_row(bridge::kColorBoost, rows::kColorBoost);
+  register_gs_row(bridge::kHDR, rows::kHDR);
 }
 
 // GT4_WINDOW_CAPTURE_DIR / GT4_WINDOW_CAPTURE_EVERY (test aid, see the top of this file).

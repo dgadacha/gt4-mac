@@ -10,14 +10,14 @@ launcher's for the built-in renderer: 16:9 at boot, 480p in races, the aspect ra
   private/tooling-venv/bin/python scripts/macos_play.py --mute            no sound (the device plays silence)
 
 In-game Graphics menu (docs/BUILD-MACOS.md): when private/macos-graphics-menu/overlay.gt4ovl exists (built by
-scripts/gt4_graphics_menu.py), the game reads its option files through it (GT4_DISC_OVERLAY) and Options > Screen gets
-the Display Mode row; --no-menu-overlay starts without it.
+scripts/gt4_graphics_menu.py), the game reads its option files through it (GT4_DISC_OVERLAY): Options > Screen gets the
+Display Mode row and, with --renderer pcsx2, Options gets the Graphics page; --no-menu-overlay starts without it.
 
 PCSX2 GS renderer (docs/BUILD-MACOS.md, section "GS process"): --renderer pcsx2 draws the picture with gt4-gs, the
 macOS build of the PCSX2 GS process, at a higher internal resolution. Its settings are private/macos-play/gs/gt4-gs.ini
 (created on first use, internal resolution 3x); --upscale N (1 to 12) sets the internal resolution multiplier,
---hdr on|off the HDR output on an EDR display and --metalfx on|off the MetalFX upscaling. The game's Options > Screen
-page changes the same settings while playing.
+--hdr on|off the HDR output on an EDR display and --metalfx on|off the MetalFX upscaling. The game's Options > Graphics
+page changes them and the others (texture filtering, anti-aliasing, sharpening, colors) while playing.
 
   private/tooling-venv/bin/python scripts/macos_play.py --renderer pcsx2 --upscale 6 --hdr on
 

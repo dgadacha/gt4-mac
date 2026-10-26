@@ -242,6 +242,15 @@ add_executable(gs_resolution_fixture gs_resolution_fixture.cpp)
 target_link_libraries(gs_resolution_fixture PRIVATE gt4_gs_resolution)
 target_compile_options(gs_resolution_fixture PRIVATE ${GT4_WARNING_FLAGS})
 add_test(NAME native_gs_resolution COMMAND $<TARGET_FILE:gs_resolution_fixture>)
+# The Graphics page rows that write keys of the GS process's settings file (filtering, FXAA, CAS, shade boost, HDR).
+add_library(gt4_gs_menu_settings STATIC gs_menu_settings.cpp)
+target_include_directories(gt4_gs_menu_settings PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(gt4_gs_menu_settings PUBLIC gt4_gs_config_file)
+target_compile_options(gt4_gs_menu_settings PRIVATE ${GT4_WARNING_FLAGS})
+add_executable(gs_menu_settings_fixture gs_menu_settings_fixture.cpp)
+target_link_libraries(gs_menu_settings_fixture PRIVATE gt4_gs_menu_settings)
+target_compile_options(gs_menu_settings_fixture PRIVATE ${GT4_WARNING_FLAGS})
+add_test(NAME native_gs_menu_settings COMMAND $<TARGET_FILE:gs_menu_settings_fixture>)
 # TASK-017 (slice205 v1, slice206 v2): license demo guard capsule (scripts/prepare_license_guard.py). Replaces the donor
 # dispatch.cpp (guard at both license loaders' demo-input calls, native/license_guard.*), kernel.cpp (halt
 # dump, off unless GT4_HALT_DUMP=1) and iop/cdvdfsv.cpp (FSV read trace, off unless GT4_FSV_TRACE=1). Every derived
@@ -908,7 +917,8 @@ if(APPLE)
     target_compile_options(gt4_picture_layer_host PRIVATE -fobjc-arc ${GT4_WARNING_FLAGS})
     target_link_libraries(gt4_picture_layer_host PUBLIC "-framework QuartzCore" "-framework CoreGraphics" "-framework ImageIO"
         "-framework AppKit")
-    target_link_libraries(gt4vulkan PRIVATE gt4_picture_layer_host gt4_gs_config_file gt4_gs_resolution)
+    # gt4_gs_menu_settings brings gt4_gs_config_file, which window_sdl.cpp also uses.
+    target_link_libraries(gt4vulkan PRIVATE gt4_picture_layer_host gt4_gs_resolution gt4_gs_menu_settings)
 endif()
 if(WIN32)
     # TASK-075: SDL3.dll and its licence next to the executables that load it (the build tree; make_distribution ships them).

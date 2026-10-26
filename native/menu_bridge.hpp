@@ -54,6 +54,11 @@ enum SettingId : int {
   kResolutionHeightBase = 20, // + n: its height
   kHDR = 4,                   // PCSX2 GS renderer: 0 SDR, 1 HDR output on EDR displays
   kMetalFX = 5,               // PCSX2 GS renderer: 0 off, 1 MetalFX upscaling to the screen
+  // PCSX2 GS renderer, the choices of gs_menu_settings.hpp:
+  kAnisotropicFiltering = 30, // 0 off, 1 2x, 2 4x, 3 8x, 4 16x
+  kAntiAliasing = 31,         // 0 off, 1 FXAA
+  kSharpening = 32,           // 0 off, 1 low, 2 medium, 3 high (FidelityFX CAS)
+  kColorBoost = 33,           // 0 off, 1 low, 2 medium, 3 high (shade boost)
 };
 
 struct Setting {

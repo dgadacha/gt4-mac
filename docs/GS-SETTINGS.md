@@ -42,7 +42,9 @@ outside it is ignored with one warning line; gt4-gs never refuses to start becau
 **macOS port (2026-10-26):** three hidden rows, `hdr`, `hdr_peak` and `metalfx` (`[GT4GS] HDR`, `HDRPeak`, `MetalFX`),
 are written by `scripts/macos_play.py` and the game's in-game Graphics menu for the macOS build of gt4-gs
 (docs/BUILD-MACOS.md, "HDR and MetalFX"). The Windows launcher does not offer them and gt4-gs.exe for Windows
-has no code for them.
+has no code for them. The same Graphics page also writes existing rows, live: `upscale_multiplier`, `MaxAnisotropy`,
+`fxaa`, `CASMode` with `CASSharpness`, and `ShadeBoost` with its four levels (docs/BUILD-MACOS.md, "In-game Graphics
+menu").
 
 ## What it is
 
