@@ -163,13 +163,16 @@ Mode switches the window to full screen and back. Not yet: the display mode is n
 ## PCSX2 GS renderer (gt4-gs)
 
 `gt4-gs` is the PCSX2 GS in a process of its own (GPL-3.0, never linked into the game; docs/GS-LIVE.md), built from
-the fork `moesuito/gt4recomp-gs`. Its macOS port is the fork's `gt4gs/macos` branch: the shared-memory transport on
-POSIX (`gs_stream_ipc_posix.cpp`), the JIT-free build on arm64, the Metal renderer, and the picture shown in the game
-window. Its publication is pending; the branch lives in `private/tooling/gt4recomp-gs`.
+the fork `moesuito/gt4recomp-gs`. Its macOS port is the `gt4gs/macos` branch of
+[dgadacha/gt4recomp-gs](https://github.com/dgadacha/gt4recomp-gs/tree/gt4gs/macos), a copy of that fork: the
+shared-memory transport on POSIX (`gs_stream_ipc_posix.cpp`), the JIT-free build on arm64, the Metal renderer, and the
+picture shown in the game window. It stays a repository of its own, apart from the game's MIT code.
 
-Build it once (about ten minutes on an M3 Pro), from the fork's folder:
+Build it once (about ten minutes on an M3 Pro), from the checkout root:
 
 ```bash
+git clone --branch gt4gs/macos https://github.com/dgadacha/gt4recomp-gs private/tooling/gt4recomp-gs
+cd private/tooling/gt4recomp-gs
 xcodebuild -downloadComponent MetalToolchain        # Xcode's Metal shader compiler, about 705 MB
 brew install cmake ninja sdl3 zstd lz4 libpng jpeg-turbo webp freetype harfbuzz
 .github/workflows/scripts/macos/build-dependencies-gt4gs-arm64.sh ../gt4gs-deps
