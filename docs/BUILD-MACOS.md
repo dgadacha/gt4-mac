@@ -129,6 +129,7 @@ same widgets:
 | Anisotropic Filtering | Off, 2x, 4x, 8x, 16x | `MaxAnisotropy` |
 | Anti-Aliasing | Off, FXAA, SMAA (sharper: it only blends the edges it finds) | `fxaa` or `[GT4GS] SMAA` |
 | Sharpening | Off, Low, Medium, High (FidelityFX CAS, sharpen only) | `CASMode` 1 and `CASSharpness` 25, 50, 100 |
+| Contact Shadows | Off, Low, Medium, High: soft shadows under the cars and in the corners of the scenery | `[GT4GS] AO` 0, 50, 100, 150 (percent) |
 | Bloom | Off, Low, Medium, High: a glow around the sky, the lights and the reflections | `[GT4GS] Bloom` 0, 20, 40, 70 (percent) |
 | Color Boost | Off, Low, Medium, High (shade boost) | `ShadeBoost`, contrast 52, 54, 56 and saturation 57, 64, 72 (50 is neutral) |
 | Film Look | Off, On: a gentle S-curve, cool shadows and warm highlights, a light vignette | `[GT4GS] FilmLook` |
@@ -141,14 +142,28 @@ its lookup textures (`3rdparty/smaa` of the fork). Bloom takes the light above a
 light 0.5, sRGB 0.73), filters it down six half-size levels and back up, and screen-blends it over the picture, which
 cannot go past white. Being part of the picture, the HUD glows too.
 
+Contact Shadows is screen-space ambient occlusion of the 3D scene, from its depth, which only exists while the game draws
+the scene: GT4 draws it into a screen-wide colour target with a depth target (test GEQUAL), then copies the colour
+elsewhere for its screen effects and the HUD, in some frames after reading the depth as a texture and reusing its memory.
+`GSRendererHW::GT4ContactShadows` (fork) follows the scene's draws and, just before the first of those draws, has the
+Metal device (`gt4ao.metal`) compute the occlusion at about 1,000 pixels wide (12 samples, normals from the depth), then
+multiply it, filtered by depth, into the scene's colour. So the HUD and the game's own screen effects come after it, as
+on a modern renderer. `gt4-gs` logs, every 600 frames, how many times it was drawn. Checked with Medium, frames compared
+with and without at the same frame (`[GT4GS] DumpDir`): the Nurburgring (race replay, drawn in 600 of 600 race frames,
+the picture 0.6 to 1.5% darker on average), New York (578 of 600, 3 to 5%: walls behind the wire fences), a night city
+course (578 of 600, 0.6%), a dirt course (600 of 600, 1%), an original circuit (457 of 600, 0.7%), and the 3D car of the
+car selection, which gets a faint shadow under it; the 2D menus never trigger it. Not checked: split screen, photo mode,
+rain.
+
 Cost, measured on an M3 Pro with the race replay at 5x (frames 3,600 to 6,000, without a window): 4.7 to 5.0 ms of
 GS work per frame with none of these effects, 7.2 to 7.7 ms with 16x filtering, FXAA, High sharpening and Medium
-color boost together, 6.1 to 6.4 ms with High bloom and the film look alone, 5.3 to 5.6 ms with SMAA alone. There is no dithering row: PCSX2's `dithering_ps2 = 0` changes no pixel of the replay (119
-frames compared from boot to race at 1x), so GT4 does not use the GS dithering there.
+color boost together, 6.1 to 6.4 ms with High bloom and the film look alone, 5.3 to 5.6 ms with SMAA alone, 6.0 to 6.4
+ms with Medium contact shadows alone. There is no dithering row: PCSX2's `dithering_ps2 = 0` changes no pixel of the
+replay (119 frames compared from boot to race at 1x), so GT4 does not use the GS dithering there.
 
 The choices apply within a few frames and are kept in the GS process's settings file; a value written there by hand
 that no choice writes shows as the default choice. Cancel on the page restores what the page opened with. The page's
-panel sits higher than the Screen page's so that its nine rows stay above the tooltip bar. Without the renderer's
+panel sits higher than the Screen page's so that its ten rows stay above the tooltip bar. Without the renderer's
 settings (the built-in renderer), neither the tile nor its row shows.
 
 The Graphics page lives in the slot of a page the disc ships unused, Camera (`CameraRoot`): its images

@@ -61,6 +61,7 @@ enum SettingId : int {
   kColorBoost = 33,           // 0 off, 1 low, 2 medium, 3 high (shade boost)
   kBloom = 34,                // 0 off, 1 low, 2 medium, 3 high (macOS gt4-gs)
   kFilmLook = 35,             // 0 off, 1 on (macOS gt4-gs)
+  kContactShadows = 36,       // 0 off, 1 low, 2 medium, 3 high (macOS gt4-gs)
 };
 
 struct Setting {

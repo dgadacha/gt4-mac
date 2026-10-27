@@ -30,6 +30,7 @@ extern const Row kMetalFX;              // [GT4GS] MetalFX: Off, On
 extern const Row kAnisotropicFiltering; // MaxAnisotropy: Off, 2x, 4x, 8x, 16x
 extern const Row kAntiAliasing;         // fxaa and [GT4GS] SMAA: Off, FXAA, SMAA
 extern const Row kSharpening;           // CASMode and CASSharpness: Off, Low, Medium, High
+extern const Row kContactShadows;       // [GT4GS] AO (percent strength): Off, Low, Medium, High
 extern const Row kBloom;                // [GT4GS] Bloom (percent strength): Off, Low, Medium, High
 extern const Row kColorBoost;           // ShadeBoost and its four levels: Off, Low, Medium, High
 extern const Row kFilmLook;             // [GT4GS] FilmLook: Off, On

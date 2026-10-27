@@ -42,6 +42,10 @@ const Row kSharpening{"sharpening",
                       {"off", "low", "medium", "high"},
                       {{"0", nullptr}, {"1", "25"}, {"1", "50"}, {"1", "100"}}};
 
+// Ambient occlusion of the 3D scene from its depth (macOS gt4-gs), in percent strength.
+const Row kContactShadows{"contact shadows", {{kGT4GS, "AO", "0"}}, {"off", "low", "medium", "high"},
+                          {{"0"}, {"50"}, {"100"}, {"150"}}};
+
 // The glow around the picture's bright parts (macOS gt4-gs), in percent strength.
 const Row kBloom{"bloom", {{kGT4GS, "Bloom", "0"}}, {"off", "low", "medium", "high"}, {{"0"}, {"20"}, {"40"}, {"70"}}};
 

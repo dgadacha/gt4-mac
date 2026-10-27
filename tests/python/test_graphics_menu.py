@@ -157,7 +157,7 @@ class GraphicsPageTests(unittest.TestCase):
         self.assertEqual(row_names(self.page), ["bg", "Title"] + [row[0] for row in menu.GRAPHICS_ROWS] + ["Buttons"])
         self.assertIn('key string {"TitleGraphics"}', stripped)
         self.assertNotIn('key string {"TitleScreen"}', stripped)
-        self.assertIn("geometry rectangle {160 82 320 150}", stripped)
+        self.assertIn("geometry rectangle {160 62 320 150}", stripped)
         self.assertIn('name string {"ToolTip"}', stripped)
         for screen_row in ("Wide", "Vertical", "Horizontal", "HiVision", "Display"):
             self.assertNotIn(f'name string {{"{screen_row}"}}', stripped)

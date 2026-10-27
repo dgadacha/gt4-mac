@@ -3,8 +3,8 @@
 The Options menu gets a Graphics page for the PCSX2 GS renderer, in the slot of a page the disc ships unused, Camera
 (CameraRoot: its images, projects/option/US/CameraRoot.gpb, are the Screen page's; its texts; its tile icon). Its rows:
 "Resolution" (Native, then up to five resolutions that the game fills in for the screen, such as 1920x1080: the internal
-resolution), "MetalFX Upscaling", "Anisotropic Filtering", "Anti-Aliasing", "Sharpening", "Bloom", "Color Boost",
-"Film Look" and "HDR". Its tile follows Sound in the General group, with an icon drawn from the Picture Quality icon
+resolution), "MetalFX Upscaling", "Anisotropic Filtering", "Anti-Aliasing", "Sharpening", "Contact Shadows", "Bloom",
+"Color Boost", "Film Look" and "HDR". Its tile follows Sound in the General group, with an icon drawn from the Picture Quality icon
 (scripts/gt4_option_icon.py). The Screen page gets a "Display Mode" row (Window / Full Screen).
 
 Every row is made of the game's own widgets: a copy of the Screen page's Video Output row in option.mproject (the widget
@@ -54,8 +54,8 @@ ORIGINAL_SHA256 = {
 # Our texts (US English, the game's capitalisation and tooltip style).
 OPTION_TEXTS = {
     'Graphics': 'Graphics',
-    'TOOLTIP|Graphics': 'Graphics Settings: Set the resolution, texture filtering, anti-aliasing, sharpening, bloom, '
-                        'colors and HDR',
+    'TOOLTIP|Graphics': 'Graphics Settings: Set the resolution, texture filtering, anti-aliasing, sharpening, shadows, '
+                        'bloom, colors and HDR',
 }
 SCREEN_TEXTS = {
     'LabelDisplay': 'Display Mode',
@@ -76,6 +76,8 @@ GRAPHICS_TEXTS = {
     'TOOLTIP|AntiAliasing': 'Smooth the jagged edges that remain, such as fences and cables. SMAA keeps the picture sharper than FXAA.',
     'LabelSharpening': 'Sharpening',
     'TOOLTIP|Sharpening': 'Make the picture crisper with AMD FidelityFX CAS.',
+    'LabelContactShadows': 'Contact Shadows',
+    'TOOLTIP|ContactShadows': 'Soft shadows under the cars and in the corners of the scenery, from the depth of the 3D scene.',
     'LabelBloom': 'Bloom',
     'TOOLTIP|Bloom': 'A glow around the sun, the sky, the lights and the reflections, as in recent games.',
     'LabelFilmLook': 'Film Look',
@@ -119,6 +121,8 @@ GRAPHICS_ROWS = [
                                            ('AntiAliasingSMAA', 'ItemSMAA')]),
     ('Sharpening', 'LabelSharpening', [('SharpeningOff', 'ItemOff'), ('SharpeningLow', 'ItemLow'),
                                        ('SharpeningMedium', 'ItemMedium'), ('SharpeningHigh', 'ItemHigh')]),
+    ('ContactShadows', 'LabelContactShadows', [('ContactShadowsOff', 'ItemOff'), ('ContactShadowsLow', 'ItemLow'),
+                                               ('ContactShadowsMedium', 'ItemMedium'), ('ContactShadowsHigh', 'ItemHigh')]),
     ('Bloom', 'LabelBloom', [('BloomOff', 'ItemOff'), ('BloomLow', 'ItemLow'), ('BloomMedium', 'ItemMedium'),
                              ('BloomHigh', 'ItemHigh')]),
     ('ColorBoost', 'LabelColorBoost', [('ColorBoostOff', 'ItemOff'), ('ColorBoostLow', 'ItemLow'),
@@ -133,8 +137,8 @@ VIDEO_OUTPUT_TOP = 116
 ROWS_TOP = 20  # under the 20-pixel title
 ROW_HEIGHT = 32
 SCREEN_PANE_ROWS = ['bg', 'Title', 'Wide', 'Vertical', 'Horizontal', 'HiVision', 'Buttons']
-# The Graphics page's pane sits higher than the Screen page's, so that its nine rows stay above the tooltip bar (y 438).
-PANE_GEOMETRY = ('geometry rectangle {160 130 320 150}', 'geometry rectangle {160 82 320 150}')
+# The Graphics page's pane sits higher than the Screen page's, so that its ten rows stay above the tooltip bar (y 438).
+PANE_GEOMETRY = ('geometry rectangle {160 130 320 150}', 'geometry rectangle {160 62 320 150}')
 
 
 def _block_end(lines, start):

@@ -1376,3 +1376,20 @@ default = "false"
 written = "when-set"
 status = "ok"
 notes = "macOS port of gt4-gs: a Metal port of the reference SMAA 1x (github.com/iryoku/smaa, MIT; High preset), on the merged picture after shade boost and FXAA, before the bloom and film look (GSDeviceMTL::ApplyGT4Look). The game's Graphics menu writes it with fxaa off."
+
+[[setting]]
+id = "ao"
+label = "Contact shadows"
+help = "macOS: darkens the creases of the 3D scene (under the cars, at the foot of walls) from its depth, in percent strength (0 is off)."
+page = "hidden"
+order = 30
+control = "slider"
+section = "GT4GS"
+key = "AO"
+type = "int"
+min = 0
+max = 200
+default = "0"
+written = "when-set"
+status = "ok"
+notes = "macOS port of gt4-gs: screen-space ambient occlusion of GT4's 3D scene, applied when the game first reads the scene's depth as a texture (GSRendererHW::GT4ContactShadows, gt4ao.metal), before its screen effects and HUD. The game's Graphics menu writes 0, 50, 100 or 150."

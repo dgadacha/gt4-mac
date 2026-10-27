@@ -23,7 +23,8 @@ int main() {
   namespace rows = gt4::gs_menu_settings;
   namespace config = gt4::gs_config;
   const rows::Row *all[] = {&rows::kMetalFX,    &rows::kAnisotropicFiltering, &rows::kAntiAliasing,
-                            &rows::kSharpening, &rows::kBloom,                &rows::kColorBoost,
+                            &rows::kSharpening, &rows::kContactShadows,       &rows::kBloom,
+                            &rows::kColorBoost,
                             &rows::kFilmLook,   &rows::kHDR};
   const std::string file = "[EmuCore/GS]\nupscale_multiplier = 5\n\n[GT4GS]\nDataRoot = /data\n";
 
@@ -47,6 +48,7 @@ int main() {
   expect(rows::current_choice(rows::kSharpening, file) == 0, "CAS is off by default");
   expect(rows::current_choice(rows::kColorBoost, file) == 0, "shade boost is off by default");
   expect(rows::current_choice(rows::kBloom, file) == 0, "bloom is off by default");
+  expect(rows::current_choice(rows::kContactShadows, file) == 0, "contact shadows are off by default");
   expect(rows::current_choice(rows::kFilmLook, file) == 0, "the film look is off by default");
   expect(rows::current_choice(rows::kHDR, file) == 0, "HDR is off by default");
 
